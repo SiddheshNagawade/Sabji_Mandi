@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from './app/store';
+import { loadAutosave } from './data/io';
 import { EditorScreen, SimulateScreen, CompareScreen, DataScreen, HistoryScreen, PitchScreen } from './screens';
 
 const TABS = [
@@ -21,7 +22,19 @@ export default function App() {
   const saveProjectFile = useAppStore((s) => s.saveProjectFile);
   const loadProjectFile = useAppStore((s) => s.loadProjectFile);
   const autosave = useAppStore((s) => s.autosave);
+  const setProject = useAppStore((s) => s.setProject);
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    void loadAutosave().then((saved) => {
+      if (saved && !cancelled) setProject(saved);
+    });
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   useEffect(() => {
     const id = setInterval(() => {
