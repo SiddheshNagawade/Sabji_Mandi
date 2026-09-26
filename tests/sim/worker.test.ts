@@ -53,4 +53,68 @@ describe('SimRunner (worker logic, no real Worker needed)', () => {
     vi.advanceTimersByTime(500);
     expect(messages.filter((m) => m.type === 'frame')).toHaveLength(0);
   });
+
+  it('seek deterministically reproduces the same state as running to that time normally', () => {
+    const project = tinyProject();
+    project.demand.hardStopS = project.demand.simStartS + 3600;
+
+    const direct: WorkerMessage[] = [];
+    const runnerA = new SimRunner((m) => direct.push(m));
+    runnerA.handle({ type: 'init', project, scenarioId: 'baseline', seed: 5 });
+    runnerA.handle({ type: 'run' });
+    vi.advanceTimersByTime(1000); // run for a while
+    runnerA.handle({ type: 'pause' });
+    const midT = (direct.filter((m) => m.type === 'metrics').pop() as { t: number }).t;
+
+    const seeked: WorkerMessage[] = [];
+    const runnerB = new SimRunner((m) => seeked.push(m));
+    runnerB.handle({ type: 'init', project, scenarioId: 'baseline', seed: 5 });
+    runnerB.handle({ type: 'seek', simTimeS: midT });
+
+    const frameA = [...direct].reverse().find((m) => m.type === 'frame') as { t: number; positions: Float32Array } | undefined;
+    const frameB = [...seeked].reverse().find((m) => m.type === 'frame') as { t: number; positions: Float32Array } | undefined;
+    expect(frameA).toBeDefined();
+    expect(frameB).toBeDefined();
+    expect(frameB!.t).toBeCloseTo(frameA!.t, 5);
+    expect(Array.from(frameB!.positions)).toEqual(Array.from(frameA!.positions));
+  });
+
+  it('answers inspectAgent, inspectStall and inspectCell queries', () => {
+    const messages: WorkerMessage[] = [];
+    const runner = new SimRunner((m) => messages.push(m));
+    const project = tinyProject();
+    project.demand.hardStopS = project.demand.simStartS + 3600;
+    const stall = {
+      kind: 'stall' as const,
+      id: 99,
+      cells: [{ x: 10, y: 5 }],
+      frontEdge: 'S' as const,
+      frontCells: [{ x: 10, y: 6 }],
+      produce: ['leafy' as const],
+      sellerType: 'farmer' as const,
+      attractiveness: assumed(1),
+      maxConcurrentCustomers: 1,
+      shaded: false,
+      locked: false,
+    };
+    project.baseline.objects.push(stall);
+
+    runner.handle({ type: 'init', project, scenarioId: 'baseline', seed: 2 });
+    runner.handle({ type: 'run' });
+    vi.advanceTimersByTime(300);
+    runner.handle({ type: 'pause' });
+
+    messages.length = 0;
+    runner.handle({ type: 'inspectStall', stallId: 99 });
+    const stallMsg = messages.find((m) => m.type === 'stallDetail') as { found: boolean } | undefined;
+    expect(stallMsg?.found).toBe(true);
+
+    runner.handle({ type: 'inspectCell', x: 10, y: 6 });
+    const cellMsg = messages.find((m) => m.type === 'cellDetail');
+    expect(cellMsg).toBeDefined();
+
+    runner.handle({ type: 'inspectAgent', agentId: 999999 });
+    const agentMsg = messages.find((m) => m.type === 'agentDetail') as { found: boolean } | undefined;
+    expect(agentMsg?.found).toBe(false);
+  });
 });

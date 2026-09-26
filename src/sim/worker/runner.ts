@@ -6,8 +6,9 @@
 import type { Project } from '../../data/schema';
 import { World } from '../core/world';
 import { isRunComplete, step } from '../core/tick';
+import { idx } from '../core/walkable';
 import { BUYER_STATE_CODE } from './protocol';
-import type { DoneMessage, FrameMessage, HeatMessage, MetricsMessage, WorkerCommand, WorkerMessage } from './protocol';
+import type { AgentDetail, CellDetail, DoneMessage, FrameMessage, HeatMessage, MetricsMessage, StallDetail, WorkerCommand, WorkerMessage } from './protocol';
 
 const FRAME_MS = 1000 / 30;
 const HEAT_MS = 1000 / 5;
@@ -50,11 +51,19 @@ export class SimRunner {
           this.postMetrics();
           break;
         case 'seek':
-          // Scrub-bar seeking needs trajectory recording, added with the
-          // Simulate screen's playback controls (M3). Ignored for now.
+          this.seek(cmd.simTimeS);
           break;
         case 'getStats':
           this.postMetrics();
+          break;
+        case 'inspectAgent':
+          this.inspectAgent(cmd.agentId);
+          break;
+        case 'inspectStall':
+          this.inspectStall(cmd.stallId);
+          break;
+        case 'inspectCell':
+          this.inspectCell(cmd.x, cmd.y);
           break;
       }
     } catch (err) {
@@ -72,6 +81,97 @@ export class SimRunner {
       clearInterval(this.intervalId);
       this.intervalId = null;
     }
+  }
+
+  /**
+   * The sim is fast enough (thousands of times real time — see the
+   * synthetic-example benchmark) that seeking by deterministically
+   * re-simulating from t=0 up to the target is simpler and more robust than
+   * a trajectory-recording ring buffer, and it's exact rather than sampled.
+   */
+  private seek(targetT: number) {
+    if (!this.project) return;
+    const wasRunning = this.intervalId != null;
+    this.stop();
+    const world = new World(this.project, this.seed);
+    const clampedTarget = Math.max(world.demand.simStartS, Math.min(targetT, world.demand.hardStopS));
+    let guard = 0;
+    while (world.t < clampedTarget && guard < 5_000_000 && !isRunComplete(world)) {
+      step(world);
+      guard++;
+    }
+    this.world = world;
+    this.postFrame();
+    this.postHeat();
+    this.postMetrics();
+    if (wasRunning) this.start();
+  }
+
+  private inspectAgent(agentId: number) {
+    const world = this.world;
+    if (!world) return;
+    const buyer = world.agents.get(agentId);
+    if (!buyer) {
+      this.post({ type: 'agentDetail', agentId, found: false });
+      return;
+    }
+    const detail: AgentDetail = {
+      id: buyer.id,
+      state: buyer.state,
+      buyerTypeId: buyer.buyerTypeId,
+      list: buyer.list,
+      listIndex: buyer.listIndex,
+      targetStallId: buyer.targetStallId,
+      speedMps: buyer.speedMps,
+      obeysArrows: buyer.obeysArrows,
+      blockedTicks: buyer.blockedTicks,
+      waitElapsedS: buyer.waitElapsedS,
+      serviceRemainingS: buyer.serviceRemainingS,
+      cellsWalked: buyer.cellsWalked,
+      timeInMarketS: world.t - buyer.spawnT,
+      lastSkipReason: buyer.lastSkipReason,
+    };
+    this.post({ type: 'agentDetail', agentId, found: true, detail });
+  }
+
+  private inspectStall(stallId: number) {
+    const world = this.world;
+    if (!world) return;
+    const runtime = world.stalls.get(stallId);
+    if (!runtime) {
+      this.post({ type: 'stallDetail', stallId, found: false });
+      return;
+    }
+    const detail: StallDetail = {
+      id: stallId,
+      label: runtime.stall.label,
+      produce: runtime.stall.produce,
+      sellerType: runtime.stall.sellerType,
+      visits: runtime.visits,
+      servedCount: runtime.servedCount,
+      currentlyServed: runtime.servedIds.size,
+      currentlyWaiting: Math.max(0, runtime.waitingOrServedIds.size - runtime.servedIds.size),
+      lostVisitsQueue: runtime.lostVisits.queue,
+      lostVisitsBlocked: runtime.lostVisits.blocked,
+      slots: runtime.slots,
+    };
+    this.post({ type: 'stallDetail', stallId, found: true, detail });
+  }
+
+  private inspectCell(x: number, y: number) {
+    const world = this.world;
+    if (!world) return;
+    const i = idx(x, y, world.width);
+    const occupant = world.occupantAgentId[i];
+    const detail: CellDetail = {
+      x,
+      y,
+      occupancySeconds: world.heat.occupancySeconds[i],
+      passCount: world.heat.passCount[i],
+      stuckSeconds: world.heat.stuckSeconds[i],
+      currentOccupantAgentId: occupant === -1 ? null : occupant,
+    };
+    this.post({ type: 'cellDetail', x, y, detail });
   }
 
   private tick() {
@@ -111,7 +211,7 @@ export class SimRunner {
       positions[i * 4 + 3] = a.blockedTicks > 0 ? 1 : 0;
       agentIds[i] = a.id;
     });
-    const msg: FrameMessage = { type: 'frame', t: world.t, positions, agentIds };
+    const msg: FrameMessage = { type: 'frame', t: world.t, positions, agentIds, running: this.intervalId != null };
     this.post(msg);
   }
 
