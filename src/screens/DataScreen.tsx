@@ -1,9 +1,11 @@
 import type { ReactNode } from 'react';
+import { useRef, useState } from 'react';
 import { useAppStore } from '../app/store';
 import { countProvenance } from '../data/provenance';
 import { computeLayoutStats } from '../data/layoutStats';
 import { generateSuggestions } from '../data/suggestions';
 import { downloadMarketReport } from '../data/reportImage';
+import { buildShareUrl } from '../data/shareLink';
 import { PRODUCE_COLORS } from '../data/schema';
 import { computeLintWarnings } from '../editor/layoutLinter';
 import { produceLabel } from '../editor/labels';
@@ -14,6 +16,10 @@ function pct(frac: number): string {
 
 export function DataScreen() {
   const project = useAppStore((s) => s.project);
+  const [shareUrl, setShareUrl] = useState<string | null>(null);
+  const [shareBusy, setShareBusy] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const shareInputRef = useRef<HTMLInputElement>(null);
   const stats = computeLayoutStats(project);
   const provenance = countProvenance(project);
   const totalParams = provenance.measured + provenance.assumed + provenance.literature;
@@ -25,6 +31,30 @@ export function DataScreen() {
 
   const insights = buildInsights(stats, provenance, totalParams, errors);
   const suggestions = generateSuggestions(project);
+
+  async function handleShare() {
+    setShareBusy(true);
+    setCopied(false);
+    try {
+      const url = await buildShareUrl(project);
+      setShareUrl(url);
+      setTimeout(() => shareInputRef.current?.select(), 0);
+    } finally {
+      setShareBusy(false);
+    }
+  }
+
+  async function handleCopy() {
+    if (!shareUrl) return;
+    try {
+      await navigator.clipboard.writeText(shareUrl);
+      setCopied(true);
+    } catch {
+      // Clipboard access can be silently blocked in some embedded/sandboxed
+      // contexts — the link is still shown in a selectable input either way.
+      shareInputRef.current?.select();
+    }
+  }
 
   return (
     <div className="h-full overflow-y-auto" style={{ background: 'var(--color-bg)' }}>
@@ -38,14 +68,50 @@ export function DataScreen() {
               What this layout is actually made of, and what the demand model assumes — computed straight from your drawing, no simulation required.
             </p>
           </div>
-          <button
-            onClick={() => downloadMarketReport(project)}
-            className="shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition hover:brightness-95"
-            style={{ background: 'var(--color-bg)', color: 'var(--color-text)', border: '1px solid var(--color-border-strong)' }}
-            title="Download a one-page PNG summary of this market"
-          >
-            ⬇ Export report
-          </button>
+          <div className="relative shrink-0">
+            <div className="flex gap-2">
+              <button
+                onClick={() => downloadMarketReport(project)}
+                className="rounded-lg px-3 py-2 text-sm font-medium transition hover:brightness-95"
+                style={{ background: 'var(--color-bg)', color: 'var(--color-text)', border: '1px solid var(--color-border-strong)' }}
+                title="Download a one-page PNG summary of this market"
+              >
+                ⬇ Export report
+              </button>
+              <button
+                onClick={() => void handleShare()}
+                disabled={shareBusy}
+                className="rounded-lg px-3 py-2 text-sm font-medium transition hover:brightness-95 disabled:opacity-60"
+                style={{ background: 'var(--color-bg)', color: 'var(--color-text)', border: '1px solid var(--color-border-strong)' }}
+                title="Get a read-only link to this report"
+              >
+                {shareBusy ? 'Building link…' : '🔗 Share'}
+              </button>
+            </div>
+            {shareUrl && (
+              <div className="absolute right-0 top-full z-20 mt-1 w-96 rounded-2xl p-3" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-lg)' }}>
+                <p className="mb-1.5 text-[11px] font-medium" style={{ color: 'var(--color-text-muted)' }}>
+                  Anyone with this link can view a read-only snapshot of this report — no account, no edit access.
+                </p>
+                <div className="flex gap-1.5">
+                  <input
+                    ref={shareInputRef}
+                    readOnly
+                    value={shareUrl}
+                    onFocus={(e) => e.target.select()}
+                    className="min-w-0 flex-1 rounded-lg border px-2 py-1.5 text-xs"
+                    style={{ borderColor: 'var(--color-border-strong)', color: 'var(--color-text)' }}
+                  />
+                  <button onClick={() => void handleCopy()} className="shrink-0 rounded-lg px-2.5 py-1 text-xs font-medium text-white" style={{ background: 'var(--color-accent)' }}>
+                    {copied ? 'Copied!' : 'Copy'}
+                  </button>
+                </div>
+                <button onClick={() => setShareUrl(null)} className="mt-2 text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+                  Close
+                </button>
+              </div>
+            )}
+          </div>
         </div>
 
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
@@ -205,7 +271,7 @@ function ProvenanceBar({ provenance, total }: { provenance: { measured: number; 
   );
 }
 
-function buildInsights(
+export function buildInsights(
   stats: ReturnType<typeof computeLayoutStats>,
   provenance: { measured: number; assumed: number; literature: number },
   totalParams: number,

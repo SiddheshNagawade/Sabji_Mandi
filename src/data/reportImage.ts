@@ -40,6 +40,10 @@ function wrapText(ctx: CanvasRenderingContext2D, text: string, maxWidth: number)
   return lines;
 }
 
+export function renderLayoutThumbnailDataUrl(project: Project, w: number, h: number): string {
+  return renderLayoutThumbnail(project, w, h).toDataURL('image/png');
+}
+
 function renderLayoutThumbnail(project: Project, w: number, h: number): HTMLCanvasElement {
   const canvas = document.createElement('canvas');
   canvas.width = w;

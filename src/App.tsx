@@ -1,7 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from './app/store';
 import { getCurrentProjectId, loadProjectFromLibrary } from './data/projectLibrary';
-import { ProjectsScreen, EditorScreen, SimulateScreen, CompareScreen, DataScreen, HistoryScreen, PitchScreen } from './screens';
+import type { ShareableReport } from './data/shareLink';
+import { SHARE_HASH_PREFIX, decodeShareableReport } from './data/shareLink';
+import { ProjectsScreen, EditorScreen, SimulateScreen, CompareScreen, DataScreen, HistoryScreen, PitchScreen, SharedReportScreen } from './screens';
 import { CommandPalette } from './app/CommandPalette';
 
 const TABS = [
@@ -18,6 +20,7 @@ type TabId = (typeof TABS)[number]['id'] | 'pitch';
 export default function App() {
   const [tab, setTab] = useState<TabId>('projects');
   const [paletteOpen, setPaletteOpen] = useState(false);
+  const [sharedReport, setSharedReport] = useState<ShareableReport | null | 'checking'>('checking');
   const project = useAppStore((s) => s.project);
   const undo = useAppStore((s) => s.undo);
   const redo = useAppStore((s) => s.redo);
@@ -28,6 +31,15 @@ export default function App() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    if (!window.location.hash.startsWith(SHARE_HASH_PREFIX)) {
+      setSharedReport(null);
+      return;
+    }
+    void decodeShareableReport(window.location.hash.slice(SHARE_HASH_PREFIX.length)).then((report) => setSharedReport(report));
+  }, []);
+
+  useEffect(() => {
+    if (sharedReport !== null) return; // don't touch the real project while showing (or still checking for) a shared read-only report
     let cancelled = false;
     void (async () => {
       const currentId = await getCurrentProjectId();
@@ -39,7 +51,7 @@ export default function App() {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [sharedReport]);
 
   useEffect(() => {
     const id = setInterval(() => {
@@ -68,6 +80,22 @@ export default function App() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [undo, redo]);
+
+  if (sharedReport === 'checking' && window.location.hash.startsWith(SHARE_HASH_PREFIX)) {
+    return <div className="h-screen" style={{ background: 'var(--color-bg)' }} />;
+  }
+
+  if (sharedReport && sharedReport !== 'checking') {
+    return (
+      <SharedReportScreen
+        report={sharedReport}
+        onClose={() => {
+          window.location.hash = '';
+          setSharedReport(null);
+        }}
+      />
+    );
+  }
 
   if (tab === 'pitch') {
     return (

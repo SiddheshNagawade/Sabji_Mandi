@@ -5,3 +5,4 @@ export { CompareScreen } from './CompareScreen';
 export { DataScreen } from './DataScreen';
 export { HistoryScreen } from './HistoryScreen';
 export { PitchScreen } from './PitchScreen';
+export { SharedReportScreen } from './SharedReportScreen';
