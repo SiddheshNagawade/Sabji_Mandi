@@ -30,13 +30,13 @@ export function TimelinePanel() {
   const simEnd = project.demand.hardStopS;
   const range = Math.max(1, simEnd - simStart);
   const selected = phases.find((p) => p.id === selectedId) ?? null;
+  const lastPhaseEnd = phases.length > 0 ? Math.max(...phases.map((p) => p.endS)) : simStart;
+  const canAddPhase = lastPhaseEnd < simEnd;
 
   function handleAddPhase() {
-    const lastEnd = phases.length > 0 ? Math.max(...phases.map((p) => p.endS)) : simStart;
-    const start = Math.min(lastEnd, simEnd - 1);
-    const end = Math.min(simEnd, start + 3600);
-    if (start >= end) return;
-    addPhase(`Phase ${phases.length + 1}`, start, end);
+    if (!canAddPhase) return;
+    const end = Math.min(simEnd, lastPhaseEnd + 3600);
+    addPhase(`Phase ${phases.length + 1}`, lastPhaseEnd, end);
   }
 
   return (
@@ -46,7 +46,12 @@ export function TimelinePanel() {
         <span>
           {fmt(simStart)} – {fmt(simEnd)}
         </span>
-        <button className="ml-auto rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50" onClick={handleAddPhase}>
+        <button
+          className="ml-auto rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-white"
+          onClick={handleAddPhase}
+          disabled={!canAddPhase}
+          title={canAddPhase ? undefined : `The whole day (${fmt(simStart)}–${fmt(simEnd)}) is already covered by phases — delete or shorten one to make room.`}
+        >
           + Add phase
         </button>
       </div>
@@ -54,7 +59,11 @@ export function TimelinePanel() {
       <div className="relative h-8 w-full overflow-hidden rounded border border-neutral-300 bg-neutral-100">
         {phases.map((p, i) => {
           const left = ((p.startS - simStart) / range) * 100;
-          const width = ((p.endS - p.startS) / range) * 100;
+          // A phase can span under a second of real time (usually a leftover
+          // from repeatedly clicking "+ Add phase" after the day was already
+          // full, before that was guarded against) — floor it to a sliver
+          // that's still visible and clickable rather than truly 0px wide.
+          const width = Math.max(0.6, ((p.endS - p.startS) / range) * 100);
           return (
             <button
               key={p.id}
@@ -69,6 +78,36 @@ export function TimelinePanel() {
         })}
         {phases.length === 0 && <div className="flex h-full items-center justify-center text-[11px] text-neutral-400">No phases yet — the layout behaves the same at all times.</div>}
       </div>
+
+      {phases.length > 0 && (
+        <div className="mt-2 max-h-32 space-y-0.5 overflow-y-auto">
+          {phases.map((p, i) => (
+            <div
+              key={p.id}
+              className="flex items-center gap-2 rounded px-1.5 py-1 text-xs hover:bg-neutral-50"
+              style={{ background: p.id === selectedId ? '#EFF6FF' : undefined }}
+            >
+              <span className="h-2.5 w-2.5 shrink-0 rounded-sm" style={{ background: PHASE_COLORS[i % PHASE_COLORS.length] }} />
+              <button className="flex-1 truncate text-left text-neutral-800" onClick={() => setSelectedId(p.id === selectedId ? null : p.id)}>
+                {p.name}
+              </button>
+              <span className="shrink-0 text-neutral-400">
+                {fmt(p.startS)}–{fmt(p.endS)}
+              </span>
+              <button
+                className="shrink-0 rounded px-1 text-red-500 hover:bg-red-50 hover:text-red-700"
+                title="Delete phase"
+                onClick={() => {
+                  deletePhase(p.id);
+                  if (selectedId === p.id) setSelectedId(null);
+                }}
+              >
+                ✕
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {selected && (
         <div className="mt-2 grid grid-cols-2 gap-3 rounded border border-neutral-200 p-2 text-xs sm:grid-cols-4">
@@ -133,7 +172,7 @@ export function TimelinePanel() {
         </div>
       )}
       <p className="mt-1 text-[10px] text-neutral-400">
-        With no phases, barriers always block and every arrow is always enforced (unchanged from before M4). Add a phase to start restricting them by time of day.
+        Outside any phase (or with none defined), barriers always block and every arrow is always enforced. Add a phase to start restricting them by time of day.
       </p>
     </div>
   );

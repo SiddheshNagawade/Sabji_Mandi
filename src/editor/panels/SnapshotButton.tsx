@@ -30,7 +30,7 @@ export function SnapshotButton() {
       </button>
       {open && (
         <div
-          className="absolute left-0 top-full z-20 mt-1 w-72 rounded-2xl p-3"
+          className="absolute right-0 top-full z-20 mt-1 w-72 rounded-2xl p-3"
           style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)', boxShadow: 'var(--shadow-lg)' }}
         >
           <label className="mb-1 block text-[11px] font-medium" style={{ color: 'var(--color-text-muted)' }}>
