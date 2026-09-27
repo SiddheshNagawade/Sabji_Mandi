@@ -1,49 +1,59 @@
 import { useAppStore } from '../app/store';
 import { CanvasEditor } from '../editor/CanvasEditor';
-import { Toolbar } from '../editor/panels/Toolbar';
-import { Palette } from '../editor/panels/Palette';
-import { LayersPanel } from '../editor/panels/LayersPanel';
-import { PropertiesPanel } from '../editor/panels/PropertiesPanel';
-import { LinterPanel, useLintCellSet } from '../editor/panels/LinterPanel';
+import { BlockHotbar } from '../editor/panels/BlockHotbar';
+import { InspectorFloating } from '../editor/panels/InspectorFloating';
+import { UtilityRail } from '../editor/panels/UtilityRail';
+import { RulesDrawer } from '../editor/panels/RulesDrawer';
+import { useLintCellSet } from '../editor/panels/LinterPanel';
 import { createSyntheticExampleProject } from '../data/sampleProject';
 
 export function EditorScreen() {
   const projectName = useAppStore((s) => s.project.meta.name);
   const isSynthetic = useAppStore((s) => s.project.meta.isSyntheticExample);
+  const gridWidth = useAppStore((s) => s.project.grid.width);
+  const gridHeight = useAppStore((s) => s.project.grid.height);
   const setProject = useAppStore((s) => s.setProject);
   const newProject = useAppStore((s) => s.newProject);
   const lintCells = useLintCellSet();
 
   return (
-    <div className="flex h-full flex-col">
-      <div className="flex items-center gap-2 border-b border-neutral-200 bg-white px-2 py-1 text-xs">
-        <span className="text-neutral-500">Scenario:</span>
-        <span className="rounded bg-neutral-100 px-2 py-0.5 font-medium">Baseline</span>
-        {isSynthetic && <span className="rounded bg-amber-100 px-2 py-0.5 font-medium text-amber-800">SYNTHETIC EXAMPLE, NOT THE REAL MANDI</span>}
+    <div className="flex h-full flex-col" style={{ background: 'var(--color-bg)' }}>
+      <div className="flex items-center gap-2 border-b px-3 py-1.5 text-xs" style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
+        <span style={{ color: 'var(--color-text-muted)' }}>{projectName}</span>
+        <span className="rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: 'var(--color-accent-soft)', color: 'var(--color-accent-hover)' }}>
+          Baseline
+        </span>
+        <span className="text-[11px]" style={{ color: 'var(--color-text-faint)' }}>
+          {gridWidth} × {gridHeight} cells
+        </span>
+        {isSynthetic && (
+          <span className="rounded-full px-2 py-0.5 text-[11px] font-medium" style={{ background: '#FDF1D8', color: '#8A5A11' }}>
+            Synthetic example — not the real mandi
+          </span>
+        )}
         <div className="ml-auto flex gap-2">
-          <button className="rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50" onClick={() => newProject()}>
+          <button
+            className="rounded-lg px-2.5 py-1 text-[11px] font-medium transition hover:brightness-95"
+            style={{ border: '1px solid var(--color-border-strong)', color: 'var(--color-text)' }}
+            onClick={() => newProject()}
+          >
             New blank project
           </button>
-          <button className="rounded border border-neutral-300 px-2 py-0.5 hover:bg-neutral-50" onClick={() => setProject(createSyntheticExampleProject())}>
+          <button
+            className="rounded-lg px-2.5 py-1 text-[11px] font-medium transition hover:brightness-95"
+            style={{ border: '1px solid var(--color-border-strong)', color: 'var(--color-text)' }}
+            onClick={() => setProject(createSyntheticExampleProject())}
+          >
             Load synthetic example
           </button>
         </div>
       </div>
-      <div className="flex min-h-0 flex-1">
-        <Toolbar />
-        <Palette />
-        <div className="min-w-0 flex-1">
-          <CanvasEditor lintCells={lintCells} />
-        </div>
-        <div className="flex w-64 shrink-0 flex-col overflow-y-auto border-l border-neutral-300 bg-white">
-          <div className="border-b border-neutral-200 px-2 py-1 text-xs font-semibold text-neutral-500">Properties</div>
-          <PropertiesPanel />
-          <LayersPanel />
-          <LinterPanel />
-        </div>
-      </div>
-      <div className="border-t border-neutral-200 bg-white px-3 py-1 text-[11px] text-neutral-400">
-        Project: {projectName} — time-rule timeline (phases, barriers, vehicle windows) arrives in Milestone M4.
+      <div className="relative min-h-0 flex-1 overflow-hidden">
+        <CanvasEditor lintCells={lintCells} />
+        <UtilityRail />
+        <RulesDrawer />
+        <InspectorFloating />
+        <BlockHotbar />
       </div>
     </div>
   );

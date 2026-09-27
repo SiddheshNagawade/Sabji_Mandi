@@ -1,6 +1,6 @@
 // Worker message protocol (SPEC.md section 9.11).
 
-import type { Project, ProduceCategory } from '../../data/schema';
+import type { Project, ProduceCategory, VehicleType } from '../../data/schema';
 
 export type WorkerCommand =
   | { type: 'init'; project: Project; scenarioId: string; seed: number }
@@ -12,7 +12,8 @@ export type WorkerCommand =
   | { type: 'getStats' }
   | { type: 'inspectAgent'; agentId: number }
   | { type: 'inspectStall'; stallId: number }
-  | { type: 'inspectCell'; x: number; y: number };
+  | { type: 'inspectCell'; x: number; y: number }
+  | { type: 'inspectVehicle'; vehicleId: number };
 
 export interface FrameMessage {
   type: 'frame';
@@ -20,6 +21,9 @@ export interface FrameMessage {
   /** [x, y, stateCode, blockedFlag] per agent, flattened. */
   positions: Float32Array;
   agentIds: Int32Array;
+  /** [anchorX, anchorY, footprintW, footprintH, vehicleTypeCode, stateCode] per vehicle, flattened. */
+  vehiclePositions: Float32Array;
+  vehicleIds: Int32Array;
   running: boolean;
 }
 
@@ -28,6 +32,8 @@ export interface HeatMessage {
   occupancySeconds: Float32Array;
   passCount: Float32Array;
   stuckSeconds: Float32Array;
+  vehicleBlockSeconds: Float32Array;
+  conflictCount: Float32Array;
 }
 
 export interface MetricsMessage {
@@ -38,6 +44,11 @@ export interface MetricsMessage {
   despawned: number;
   skippedQueue: number;
   skippedBlocked: number;
+  vehiclesInMarket: number;
+  vehiclesSpawned: number;
+  vehiclesDespawned: number;
+  vehiclesFailedUnloads: number;
+  vehicleConflicts: number;
 }
 
 export interface DoneMessage {
@@ -112,7 +123,25 @@ export interface CellDetailMessage {
   detail: CellDetail;
 }
 
-export type WorkerMessage = FrameMessage | HeatMessage | MetricsMessage | DoneMessage | ErrorMessage | AgentDetailMessage | StallDetailMessage | CellDetailMessage;
+export interface VehicleDetail {
+  id: number;
+  vehicleType: VehicleType;
+  state: string;
+  targetBayId: number | null;
+  dwellRemainingS: number;
+  waitTicks: number;
+  timeInMarketS: number;
+  failedUnload: boolean;
+}
+
+export interface VehicleDetailMessage {
+  type: 'vehicleDetail';
+  vehicleId: number;
+  found: boolean;
+  detail?: VehicleDetail;
+}
+
+export type WorkerMessage = FrameMessage | HeatMessage | MetricsMessage | DoneMessage | ErrorMessage | AgentDetailMessage | StallDetailMessage | CellDetailMessage | VehicleDetailMessage;
 
 export const BUYER_STATE_CODE: Record<string, number> = {
   WALK: 0,
@@ -123,3 +152,18 @@ export const BUYER_STATE_CODE: Record<string, number> = {
 };
 
 export const BUYER_STATE_NAME = ['walking', 'queuing', 'being served', 'leaving', 'despawned'];
+
+export const VEHICLE_STATE_CODE: Record<string, number> = {
+  APPROACH: 0,
+  DWELL: 1,
+  DEPART: 2,
+  DESPAWNED: 3,
+};
+export const VEHICLE_STATE_NAME = ['approaching', 'dwelling', 'departing', 'despawned'];
+
+export const VEHICLE_TYPE_CODE: Record<VehicleType, number> = {
+  handcart: 0,
+  two_wheeler: 1,
+  tempo: 2,
+};
+export const VEHICLE_TYPE_NAME: VehicleType[] = ['handcart', 'two_wheeler', 'tempo'];

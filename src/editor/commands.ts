@@ -2,7 +2,7 @@
 // its inverse, and optionally an objects-table before/after pair) so every
 // stroke is exactly one undoable command, per SPEC.md section 7.2/7.8.
 
-import type { CellChange, Dir4, Entrance, EntranceType, Layout, LayoutObject, ProduceCategory, Stall, Transect, XY } from '../data/schema';
+import type { Barrier, CellChange, Dir4, Entrance, EntranceType, Layout, LayoutObject, ProduceCategory, Stall, Transect, VehicleBay, VehicleType, XY } from '../data/schema';
 import { TileId, assumed } from '../data/schema';
 import type { EditorCommand, LayerName } from '../app/store';
 import { idx, inBounds, rasterRect } from './grid';
@@ -130,6 +130,34 @@ export function buildAddEntranceCommand(layout: Layout, width: number, height: n
     objectsBefore: layout.objects,
     objectsAfter: [...layout.objects, entrance],
   };
+}
+
+export function buildAddBarrierCommand(layout: Layout, width: number, height: number, cells: XY[], nextId: number): EditorCommand {
+  const valid = cells.filter((c) => inBounds(c.x, c.y, width, height));
+  const barrier: Barrier = { kind: 'barrier', id: nextId, cells: valid, label: `Barrier ${nextId}` };
+  const patch: CellChange[] = [];
+  const inverse: CellChange[] = [];
+  for (const c of valid) {
+    const i = idx(c.x, c.y, width);
+    if (layout.terrain[i] === TileId.Barrier) continue;
+    patch.push({ x: c.x, y: c.y, layer: 'terrain', value: TileId.Barrier });
+    inverse.push({ x: c.x, y: c.y, layer: 'terrain', value: layout.terrain[i] });
+  }
+  return { label: 'Add barrier', patch, inverse, objectsBefore: layout.objects, objectsAfter: [...layout.objects, barrier] };
+}
+
+export function buildAddVehicleBayCommand(layout: Layout, width: number, height: number, x0: number, y0: number, w: number, h: number, vehicleType: VehicleType, nextId: number): EditorCommand {
+  const cells = rasterRect(x0, y0, x0 + w - 1, y0 + h - 1, false).filter((c) => inBounds(c.x, c.y, width, height));
+  const bay: VehicleBay = { kind: 'vehicle_bay', id: nextId, cells, vehicleType, label: `Bay ${nextId}` };
+  const patch: CellChange[] = [];
+  const inverse: CellChange[] = [];
+  for (const c of cells) {
+    const i = idx(c.x, c.y, width);
+    if (layout.terrain[i] === TileId.VehicleBay) continue;
+    patch.push({ x: c.x, y: c.y, layer: 'terrain', value: TileId.VehicleBay });
+    inverse.push({ x: c.x, y: c.y, layer: 'terrain', value: layout.terrain[i] });
+  }
+  return { label: 'Add vehicle bay', patch, inverse, objectsBefore: layout.objects, objectsAfter: [...layout.objects, bay] };
 }
 
 export function buildAddTransectCommand(layout: Layout, a: XY, b: XY, nextId: number): EditorCommand {

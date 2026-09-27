@@ -1,6 +1,6 @@
 import { useSimStore } from '../../app/simStore';
-import type { AgentDetail, CellDetail, StallDetail } from '../../sim/worker/protocol';
-import { BUYER_STATE_NAME, BUYER_STATE_CODE } from '../../sim/worker/protocol';
+import type { AgentDetail, CellDetail, StallDetail, VehicleDetail } from '../../sim/worker/protocol';
+import { BUYER_STATE_NAME, BUYER_STATE_CODE, VEHICLE_STATE_NAME, VEHICLE_STATE_CODE } from '../../sim/worker/protocol';
 
 export function InspectPanel() {
   const inspect = useSimStore((s) => s.inspect);
@@ -22,6 +22,7 @@ export function InspectPanel() {
       {inspect.kind === 'agent' && inspect.detail && <AgentInfo detail={inspect.detail as AgentDetail} />}
       {inspect.kind === 'stall' && inspect.detail && <StallInfo detail={inspect.detail as StallDetail} />}
       {inspect.kind === 'cell' && inspect.detail && <CellInfo detail={inspect.detail as CellDetail} />}
+      {inspect.kind === 'vehicle' && inspect.detail && <VehicleInfo detail={inspect.detail as VehicleDetail} />}
     </div>
   );
 }
@@ -63,6 +64,22 @@ function StallInfo({ detail }: { detail: StallDetail }) {
       <div>
         Lost visits: {detail.lostVisitsQueue} (queue), {detail.lostVisitsBlocked} (blocked)
       </div>
+    </div>
+  );
+}
+
+function VehicleInfo({ detail }: { detail: VehicleDetail }) {
+  const stateName = VEHICLE_STATE_NAME[VEHICLE_STATE_CODE[detail.state] ?? 0] ?? detail.state;
+  return (
+    <div className="space-y-1">
+      <div>
+        Vehicle #{detail.id} · {detail.vehicleType.replace('_', ' ')}
+      </div>
+      <div>State: {stateName}</div>
+      <div>Time in market: {detail.timeInMarketS.toFixed(0)} s</div>
+      {detail.state === 'DWELL' && <div>Dwell remaining: {detail.dwellRemainingS.toFixed(0)} s</div>}
+      {detail.targetBayId != null && <div>Target bay: #{detail.targetBayId}</div>}
+      {detail.failedUnload && <div className="text-amber-700">Failed to unload — never found a free bay in time.</div>}
     </div>
   );
 }

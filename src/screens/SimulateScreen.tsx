@@ -3,6 +3,7 @@ import { useAppStore } from '../app/store';
 import { useSimStore } from '../app/simStore';
 import { ValidationBanner } from '../ui/ValidationBanner';
 import { SimulateCanvas } from './simulate/SimulateCanvas';
+import { SimStatus } from './simulate/SimStatus';
 import { PlaybackBar } from './simulate/PlaybackBar';
 import { ControlsPanel } from './simulate/ControlsPanel';
 import { InspectPanel } from './simulate/InspectPanel';
@@ -12,7 +13,6 @@ import { PerfTest } from './simulate/PerfTest';
 export function SimulateScreen() {
   const project = useAppStore((s) => s.project);
   const worker = useSimStore((s) => s.worker);
-  const status = useSimStore((s) => s.status);
   const init = useSimStore((s) => s.init);
   const terminate = useSimStore((s) => s.terminate);
 
@@ -38,13 +38,14 @@ export function SimulateScreen() {
   }, []);
 
   return (
-    <div className="flex h-full flex-col">
+    <div className="flex h-full flex-col" style={{ background: 'var(--color-bg)' }}>
       <ValidationBanner />
+      <SimStatus />
       <div className="flex min-h-0 flex-1">
         <div className="min-w-0 flex-1">
           <SimulateCanvas />
         </div>
-        <div className="flex w-72 shrink-0 flex-col overflow-y-auto border-l border-neutral-300 bg-white">
+        <div className="flex w-72 shrink-0 flex-col overflow-y-auto border-l" style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
           <ControlsPanel />
           <InspectPanel />
           <Charts />
@@ -52,7 +53,6 @@ export function SimulateScreen() {
         </div>
       </div>
       <PlaybackBar />
-      {!worker && status === 'idle' && <div className="p-2 text-center text-xs text-neutral-400">Starting simulation worker…</div>}
     </div>
   );
 }

@@ -31,7 +31,7 @@ function sequentialColor(t: number): string {
   return `rgb(${r},${g},${bl})`;
 }
 
-export type HeatKind = 'density' | 'footfall' | 'stuck';
+export type HeatKind = 'density' | 'footfall' | 'stuck' | 'vehicleBlock' | 'conflict';
 
 export function drawHeatOverlay(ctx: CanvasRenderingContext2D, kind: HeatKind, values: Float32Array, width: number, height: number, viewport: Viewport, opacity: number) {
   let max = 0;

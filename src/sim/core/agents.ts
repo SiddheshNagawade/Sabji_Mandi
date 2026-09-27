@@ -18,6 +18,7 @@ import { idx } from './walkable';
 import { lognormalSample, normalSample, randInt, softmaxPick } from './rng';
 import type { Rng } from './rng';
 import type { Entrance, ProduceCategory } from '../../data/schema';
+import { isEntranceOpenNow } from './rules';
 
 function pickWeighted<T>(rng: Rng, items: T[], weight: (t: T) => number): T {
   const total = items.reduce((s, x) => s + weight(x), 0);
@@ -34,11 +35,12 @@ function entranceCellIndices(world: World, e: Entrance): number[] {
 }
 
 export function spawnBuyers(world: World, count: number) {
-  if (count <= 0 || world.entrancesIn.length === 0) return;
+  const openEntrances = world.entrancesIn.filter((e) => isEntranceOpenNow(e, world.t));
+  if (count <= 0 || openEntrances.length === 0) return;
   for (let n = 0; n < count; n++) {
-    const entrance = pickWeighted(world.rng, world.entrancesIn, (e) => Math.max(0.01, e.weight.value));
+    const entrance = pickWeighted(world.rng, openEntrances, (e) => Math.max(0.01, e.weight.value));
     const cells = entranceCellIndices(world, entrance);
-    const freeCell = cells.find((c) => world.occupantAgentId[c] === -1 && world.terrain[c] !== undefined);
+    const freeCell = cells.find((c) => world.occupantAgentId[c] === -1 && world.vehicleOccupant[c] === -1);
     if (freeCell === undefined) continue; // gate is full this tick
 
     const type = pickWeighted(world.rng, world.demand.buyerTypes, (t) => Math.max(0.001, t.share.value));
@@ -203,7 +205,7 @@ export function decide(world: World, buyer: Buyer): boolean {
       return false;
     }
     case 'LEAVE': {
-      const exitCells = world.entrancesOut.flatMap((e) => entranceCellIndices(world, e));
+      const exitCells = world.entrancesOut.filter((e) => isEntranceOpenNow(e, world.t)).flatMap((e) => entranceCellIndices(world, e));
       if (exitCells.includes(buyer.cell)) {
         buyer.state = 'DESPAWNED';
         buyer.despawnT = world.t;
@@ -227,5 +229,5 @@ function sampleServiceTime(world: World, buyer: Buyer): number {
 }
 
 export function exitGoalCells(world: World): number[] {
-  return world.entrancesOut.flatMap((e) => entranceCellIndices(world, e));
+  return world.entrancesOut.filter((e) => isEntranceOpenNow(e, world.t)).flatMap((e) => entranceCellIndices(world, e));
 }

@@ -74,32 +74,43 @@ export default function App() {
   }
 
   return (
-    <div className="flex h-screen flex-col bg-[#f2efe6]">
-      <header className="flex items-center gap-4 border-b border-neutral-300 bg-white px-3 py-2">
-        <span className="font-semibold">Mandi Flow Simulator</span>
-        <nav className="flex gap-1">
+    <div className="flex h-screen flex-col" style={{ background: 'var(--color-bg)' }}>
+      <header
+        className="flex items-center gap-5 px-4 py-2.5"
+        style={{ background: 'var(--color-surface)', borderBottom: '1px solid var(--color-border)', boxShadow: 'var(--shadow-sm)' }}
+      >
+        <span className="text-[15px] font-semibold tracking-tight" style={{ color: 'var(--color-text)' }}>
+          Mandi Flow Simulator
+        </span>
+        <nav className="flex gap-1 rounded-xl p-1" style={{ background: 'var(--color-bg)' }}>
           {TABS.filter((t) => t.id !== 'pitch').map((t) => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
-              className={`rounded px-3 py-1 text-sm ${tab === t.id ? 'bg-neutral-800 text-white' : 'text-neutral-700 hover:bg-neutral-100'}`}
+              className="rounded-lg px-3 py-1.5 text-[13px] font-medium transition"
+              style={
+                tab === t.id
+                  ? { background: 'var(--color-surface)', color: 'var(--color-text)', boxShadow: 'var(--shadow-sm)' }
+                  : { color: 'var(--color-text-muted)' }
+              }
             >
               {t.label}
             </button>
           ))}
         </nav>
-        <div className="ml-auto flex items-center gap-2 text-sm">
-          <span className="text-neutral-500">Project: {project.meta.name}</span>
-          <button className="rounded border border-neutral-300 px-2 py-1 hover:bg-neutral-100" onClick={undo}>
-            Undo
+        <div className="ml-auto flex items-center gap-2 text-[13px]" style={{ color: 'var(--color-text-muted)' }}>
+          <span className="mr-1 hidden sm:inline">{project.meta.name}</span>
+          <button className="rounded-lg px-2.5 py-1.5 font-medium transition hover:bg-[var(--color-bg)]" onClick={undo} title="Undo (Ctrl+Z)">
+            ↶ Undo
           </button>
-          <button className="rounded border border-neutral-300 px-2 py-1 hover:bg-neutral-100" onClick={redo}>
-            Redo
+          <button className="rounded-lg px-2.5 py-1.5 font-medium transition hover:bg-[var(--color-bg)]" onClick={redo} title="Redo (Ctrl+Shift+Z)">
+            ↷ Redo
           </button>
-          <button className="rounded border border-neutral-300 px-2 py-1 hover:bg-neutral-100" onClick={saveProjectFile}>
+          <div className="mx-0.5 h-5 w-px" style={{ background: 'var(--color-border)' }} />
+          <button className="rounded-lg px-2.5 py-1.5 font-medium transition hover:bg-[var(--color-bg)]" onClick={saveProjectFile}>
             Save
           </button>
-          <button className="rounded border border-neutral-300 px-2 py-1 hover:bg-neutral-100" onClick={() => fileInputRef.current?.click()}>
+          <button className="rounded-lg px-2.5 py-1.5 font-medium transition hover:bg-[var(--color-bg)]" onClick={() => fileInputRef.current?.click()}>
             Load
           </button>
           <input

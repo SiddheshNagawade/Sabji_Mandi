@@ -1,9 +1,9 @@
 import { create } from 'zustand';
 import type { Project } from '../data/schema';
-import type { AgentDetail, CellDetail, StallDetail, WorkerMessage } from '../sim/worker/protocol';
+import type { AgentDetail, CellDetail, StallDetail, VehicleDetail, WorkerMessage } from '../sim/worker/protocol';
 import { peakDensity } from '../metrics/collectors';
 
-export type HeatMode = 'agents' | 'density' | 'footfall' | 'stuck';
+export type HeatMode = 'agents' | 'density' | 'footfall' | 'stuck' | 'vehicleBlock' | 'conflict';
 
 export interface MetricsSample {
   t: number;
@@ -12,12 +12,13 @@ export interface MetricsSample {
   despawned: number;
   skippedTotal: number;
   peakDensity: number;
+  vehiclesInMarket: number;
 }
 
 interface InspectState {
-  kind: 'agent' | 'stall' | 'cell';
+  kind: 'agent' | 'stall' | 'cell' | 'vehicle';
   id: number | string;
-  detail: AgentDetail | StallDetail | CellDetail | null;
+  detail: AgentDetail | StallDetail | CellDetail | VehicleDetail | null;
 }
 
 interface SimState {
@@ -34,8 +35,21 @@ interface SimState {
   cellSizeM: number;
   positions: Float32Array;
   agentIds: Int32Array;
-  heat: { occupancySeconds: Float32Array; passCount: Float32Array; stuckSeconds: Float32Array } | null;
-  metrics: { peopleInMarket: number; spawned: number; despawned: number; skippedQueue: number; skippedBlocked: number };
+  vehiclePositions: Float32Array;
+  vehicleIds: Int32Array;
+  heat: { occupancySeconds: Float32Array; passCount: Float32Array; stuckSeconds: Float32Array; vehicleBlockSeconds: Float32Array; conflictCount: Float32Array } | null;
+  metrics: {
+    peopleInMarket: number;
+    spawned: number;
+    despawned: number;
+    skippedQueue: number;
+    skippedBlocked: number;
+    vehiclesInMarket: number;
+    vehiclesSpawned: number;
+    vehiclesDespawned: number;
+    vehiclesFailedUnloads: number;
+    vehicleConflicts: number;
+  };
   metricsHistory: MetricsSample[];
   doneInfo: { timesInMarket: number[] } | null;
   heatMode: HeatMode;
@@ -58,6 +72,7 @@ interface SimState {
   inspectAgent: (id: number) => void;
   inspectStall: (id: number) => void;
   inspectCell: (x: number, y: number) => void;
+  inspectVehicle: (id: number) => void;
   clearInspect: () => void;
   terminate: () => void;
 }
@@ -87,8 +102,10 @@ export const useSimStore = create<SimState>((set, get) => ({
   cellSizeM: 0.5,
   positions: new Float32Array(0),
   agentIds: new Int32Array(0),
+  vehiclePositions: new Float32Array(0),
+  vehicleIds: new Int32Array(0),
   heat: null,
-  metrics: { peopleInMarket: 0, spawned: 0, despawned: 0, skippedQueue: 0, skippedBlocked: 0 },
+  metrics: { peopleInMarket: 0, spawned: 0, despawned: 0, skippedQueue: 0, skippedBlocked: 0, vehiclesInMarket: 0, vehiclesSpawned: 0, vehiclesDespawned: 0, vehiclesFailedUnloads: 0, vehicleConflicts: 0 },
   metricsHistory: [],
   doneInfo: null,
   heatMode: 'agents',
@@ -116,6 +133,8 @@ export const useSimStore = create<SimState>((set, get) => ({
       cellSizeM: project.grid.cellSizeM.value,
       positions: new Float32Array(0),
       agentIds: new Int32Array(0),
+      vehiclePositions: new Float32Array(0),
+      vehicleIds: new Int32Array(0),
       heat: null,
       metricsHistory: [],
       doneInfo: null,
@@ -168,6 +187,10 @@ export const useSimStore = create<SimState>((set, get) => ({
     set({ inspect: { kind: 'cell', id: `${x},${y}`, detail: null } });
     get().worker?.postMessage({ type: 'inspectCell', x, y });
   },
+  inspectVehicle: (id) => {
+    set({ inspect: { kind: 'vehicle', id, detail: null } });
+    get().worker?.postMessage({ type: 'inspectVehicle', vehicleId: id });
+  },
   clearInspect: () => set({ inspect: null }),
 
   terminate: () => {
@@ -179,10 +202,10 @@ export const useSimStore = create<SimState>((set, get) => ({
 function handleMessage(set: (partial: Partial<SimState>) => void, get: () => SimState, msg: WorkerMessage) {
   switch (msg.type) {
     case 'frame':
-      set({ t: msg.t, positions: msg.positions, agentIds: msg.agentIds, status: msg.running ? 'running' : get().status });
+      set({ t: msg.t, positions: msg.positions, agentIds: msg.agentIds, vehiclePositions: msg.vehiclePositions, vehicleIds: msg.vehicleIds, status: msg.running ? 'running' : get().status });
       break;
     case 'heat':
-      set({ heat: { occupancySeconds: msg.occupancySeconds, passCount: msg.passCount, stuckSeconds: msg.stuckSeconds } });
+      set({ heat: { occupancySeconds: msg.occupancySeconds, passCount: msg.passCount, stuckSeconds: msg.stuckSeconds, vehicleBlockSeconds: msg.vehicleBlockSeconds, conflictCount: msg.conflictCount } });
       break;
     case 'metrics': {
       const state = get();
@@ -193,11 +216,26 @@ function handleMessage(set: (partial: Partial<SimState>) => void, get: () => Sim
         despawned: msg.despawned,
         skippedTotal: msg.skippedQueue + msg.skippedBlocked,
         peakDensity: peakDensity(state.positions, state.gridWidth, state.gridHeight, state.cellSizeM),
+        vehiclesInMarket: msg.vehiclesInMarket,
       };
       const history = state.metricsHistory;
       const next = [...history, sample];
       if (next.length > 600) next.shift();
-      set({ metrics: { peopleInMarket: msg.peopleInMarket, spawned: msg.spawned, despawned: msg.despawned, skippedQueue: msg.skippedQueue, skippedBlocked: msg.skippedBlocked }, metricsHistory: next });
+      set({
+        metrics: {
+          peopleInMarket: msg.peopleInMarket,
+          spawned: msg.spawned,
+          despawned: msg.despawned,
+          skippedQueue: msg.skippedQueue,
+          skippedBlocked: msg.skippedBlocked,
+          vehiclesInMarket: msg.vehiclesInMarket,
+          vehiclesSpawned: msg.vehiclesSpawned,
+          vehiclesDespawned: msg.vehiclesDespawned,
+          vehiclesFailedUnloads: msg.vehiclesFailedUnloads,
+          vehicleConflicts: msg.vehicleConflicts,
+        },
+        metricsHistory: next,
+      });
       break;
     }
     case 'done':
@@ -219,6 +257,11 @@ function handleMessage(set: (partial: Partial<SimState>) => void, get: () => Sim
     case 'cellDetail':
       if (get().inspect?.kind === 'cell' && get().inspect?.id === `${msg.x},${msg.y}`) {
         set({ inspect: { kind: 'cell', id: `${msg.x},${msg.y}`, detail: msg.detail } });
+      }
+      break;
+    case 'vehicleDetail':
+      if (get().inspect?.kind === 'vehicle' && get().inspect?.id === msg.vehicleId) {
+        set({ inspect: { kind: 'vehicle', id: msg.vehicleId, detail: msg.found ? (msg.detail ?? null) : null } });
       }
       break;
   }

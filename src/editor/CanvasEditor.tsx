@@ -3,18 +3,32 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../app/store';
 import type { XY } from '../data/schema';
 import { TILE_INFO } from '../data/schema';
+import { PRIMARY_BLOCKS } from './blocks';
 import { applyBrushSize, floodFillIndices, idx, inBounds, quantizeDirection, rasterLine, rasterRect } from './grid';
 import { objectAtCell } from './objectLayer';
 import type { LayerVisibility, Viewport } from '../viz/renderTiles';
 import { cellToScreen, drawScene, screenToCell } from '../viz/renderTiles';
 
-const ARROW_KEY_DIR: Record<string, number> = { ArrowUp: 1, ArrowRight: 3, ArrowDown: 5, ArrowLeft: 7 };
+// How close (in cells) to the current right/bottom edge triggers growth, and
+// how many cells to grow by each time — gives the user room to keep dragging
+// without hitting a hard wall (SPEC-driven UX: "the sheet gets larger as I draw").
+const GROW_MARGIN = 6;
+const GROW_CHUNK = 16;
 
-interface PendingArrowRect {
-  x0: number;
-  y0: number;
-  x1: number;
-  y1: number;
+function ensureCapacityFor(cell: XY): { width: number; height: number } {
+  const s = useAppStore.getState();
+  const w = s.project.grid.width;
+  const h = s.project.grid.height;
+  let newWidth = w;
+  let newHeight = h;
+  if (cell.x >= w - GROW_MARGIN) newWidth = cell.x + GROW_CHUNK;
+  if (cell.y >= h - GROW_MARGIN) newHeight = cell.y + GROW_CHUNK;
+  if (newWidth > w || newHeight > h) {
+    s.growGrid(newWidth, newHeight);
+    const s2 = useAppStore.getState();
+    return { width: s2.project.grid.width, height: s2.project.grid.height };
+  }
+  return { width: w, height: h };
 }
 
 export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
@@ -33,6 +47,7 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
   const stallSize = useAppStore((s) => s.stallSize);
   const stallFrontEdge = useAppStore((s) => s.stallFrontEdge);
   const entranceType = useAppStore((s) => s.entranceType);
+  const vehicleBayType = useAppStore((s) => s.vehicleBayType);
   const layerVisible = useAppStore((s) => s.layerVisible);
   const selectedObjectId = useAppStore((s) => s.selectedObjectId);
   const showGrid = useAppStore((s) => s.showGrid);
@@ -49,12 +64,14 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
   const flipStallFrontEdge = useAppStore((s) => s.flipStallFrontEdge);
   const setSelectedObjectId = useAppStore((s) => s.setSelectedObjectId);
   const toggleGrid = useAppStore((s) => s.toggleGrid);
-  const toggleLayerVisible = useAppStore((s) => s.toggleLayerVisible);
+  const setActiveBlock = useAppStore((s) => s.setActiveBlock);
   const paintCells = useAppStore((s) => s.paintCells);
   const addArrowStroke = useAppStore((s) => s.addArrowStroke);
   const addStall = useAppStore((s) => s.addStall);
   const addEntrance = useAppStore((s) => s.addEntrance);
   const addTransect = useAppStore((s) => s.addTransect);
+  const addBarrier = useAppStore((s) => s.addBarrier);
+  const addVehicleBay = useAppStore((s) => s.addVehicleBay);
   const deleteSelectedObject = useAppStore((s) => s.deleteSelectedObject);
   const addCalibrationClick = useAppStore((s) => s.addCalibrationClick);
   const applyCalibration = useAppStore((s) => s.applyCalibration);
@@ -63,12 +80,12 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
   const width = project.grid.width;
   const height = project.grid.height;
   const layout = project.baseline;
+  const vehicleTypeFootprints = project.demand.vehicleTypes;
 
-  const [viewport, setViewport] = useState<Viewport>({ originX: 20, originY: 20, zoom: 8 });
+  const [viewport, setViewport] = useState<Viewport>({ originX: 20, originY: 20, zoom: 32 });
   const [hoverCell, setHoverCell] = useState<XY | null>(null);
   const [measureEnd, setMeasureEnd] = useState<XY | null>(null);
   const [measureStart, setMeasureStart] = useState<XY | null>(null);
-  const [pendingArrowRect, setPendingArrowRect] = useState<PendingArrowRect | null>(null);
   const [previewRect, setPreviewRect] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
   const [calibPromptOpen, setCalibPromptOpen] = useState(false);
   const [calibMetres, setCalibMetres] = useState('1');
@@ -152,15 +169,6 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
       ctx.lineWidth = 2;
       ctx.strokeRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
     }
-    if (pendingArrowRect) {
-      const a = cellToScreen(viewport, pendingArrowRect.x0, pendingArrowRect.y0);
-      const b = cellToScreen(viewport, pendingArrowRect.x1 + 1, pendingArrowRect.y1 + 1);
-      ctx.strokeStyle = '#1D6FD8';
-      ctx.setLineDash([5, 3]);
-      ctx.lineWidth = 2;
-      ctx.strokeRect(Math.min(a.x, b.x), Math.min(a.y, b.y), Math.abs(b.x - a.x), Math.abs(b.y - a.y));
-      ctx.setLineDash([]);
-    }
     if (measureStart && measureEnd) {
       const a = cellToScreen(viewport, measureStart.x + 0.5, measureStart.y + 0.5);
       const b = cellToScreen(viewport, measureEnd.x + 0.5, measureEnd.y + 0.5);
@@ -192,7 +200,7 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layoutVersion, viewport, layerVisible, showGrid, selectedObjectId, lintCellSet, previewRect, pendingArrowRect, measureStart, measureEnd, calibrationClicks, hoverCell, tool, brushSize, stallSize, project.background]);
+  }, [layoutVersion, viewport, layerVisible, showGrid, selectedObjectId, lintCellSet, previewRect, measureStart, measureEnd, calibrationClicks, hoverCell, tool, brushSize, stallSize, project.background]);
 
   const getCellFromEvent = useCallback(
     (e: { clientX: number; clientY: number }): XY => {
@@ -253,7 +261,6 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
       e.preventDefault();
       (e.target as Element).setPointerCapture(e.pointerId);
       const cell = getCellFromEvent(e);
-      if (!inBounds(cell.x, cell.y, width, height)) return;
 
       if (panRef.current.active || spaceHeldRef.current || e.button === 1) {
         panRef.current = { active: true, lastScreen: { x: e.clientX, y: e.clientY } };
@@ -261,6 +268,7 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
       }
 
       if (bgMode === 'calibrate') {
+        if (!inBounds(cell.x, cell.y, width, height)) return;
         addCalibrationClick(cell);
         if (calibrationClicks.length === 1) setCalibPromptOpen(true);
         return;
@@ -271,6 +279,11 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
       }
 
       const effectiveTool = e.button === 2 ? 'eraser' : tool;
+      // Placing/painting near the current right/bottom edge grows the grid first,
+      // so a drag never hits a hard wall mid-stroke.
+      const bounds = effectiveTool === 'select' ? { width, height } : ensureCapacityFor(cell);
+      if (!inBounds(cell.x, cell.y, bounds.width, bounds.height)) return;
+
       dragRef.current = { active: true, button: e.button, shift: e.shiftKey, alt: e.altKey, start: cell, last: cell };
 
       if (effectiveTool === 'select') {
@@ -296,16 +309,12 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
         return;
       }
       if (effectiveTool === 'brush' || effectiveTool === 'eraser') {
+        if (e.shiftKey) return; // shift-drag fills a rectangle instead; handled on move/up
         paintMapRef.current.clear();
         addBrushStrokeCells(cell, cell);
         return;
       }
       if (effectiveTool === 'arrow') {
-        if (e.shiftKey) {
-          setPendingArrowRect({ x0: cell.x, y0: cell.y, x1: cell.x, y1: cell.y });
-          dragRef.current.active = false;
-          return;
-        }
         arrowMapRef.current.clear();
         addArrowStrokeCells(cell, cell);
         return;
@@ -353,11 +362,17 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
         }
         return;
       }
-      if (!dragRef.current.active || !inBounds(cell.x, cell.y, width, height)) return;
+      if (!dragRef.current.active) return;
       const effectiveTool = dragRef.current.button === 2 ? 'eraser' : tool;
+      const bounds = effectiveTool === 'select' ? { width, height } : ensureCapacityFor(cell);
+      if (!inBounds(cell.x, cell.y, bounds.width, bounds.height)) return;
       const prevLast = dragRef.current.last;
       dragRef.current.last = cell;
 
+      if ((effectiveTool === 'brush' || effectiveTool === 'eraser') && dragRef.current.shift) {
+        setPreviewRect(rectFromDrag(dragRef.current.start, cell, false));
+        return;
+      }
       if (effectiveTool === 'brush' || effectiveTool === 'eraser') {
         addBrushStrokeCells(prevLast, cell);
         return;
@@ -370,11 +385,11 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
         setMeasureEnd(cell);
         return;
       }
-      if (effectiveTool === 'rect' || effectiveTool === 'stall') {
+      if (effectiveTool === 'rect' || effectiveTool === 'stall' || effectiveTool === 'vehicle_bay') {
         setPreviewRect(rectFromDrag(dragRef.current.start, cell, dragRef.current.shift));
         return;
       }
-      if (effectiveTool === 'line' || effectiveTool === 'entrance' || effectiveTool === 'transect') {
+      if (effectiveTool === 'line' || effectiveTool === 'entrance' || effectiveTool === 'transect' || effectiveTool === 'barrier') {
         setPreviewRect({ x0: dragRef.current.start.x, y0: dragRef.current.start.y, x1: cell.x, y1: cell.y });
       }
     },
@@ -394,6 +409,13 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
       const effectiveTool = dragRef.current.button === 2 ? 'eraser' : tool;
       const start = dragRef.current.start;
 
+      if ((effectiveTool === 'brush' || effectiveTool === 'eraser') && dragRef.current.shift) {
+        const r = rectFromDrag(start, clamped, false);
+        const cells = rasterRect(r.x0, r.y0, r.x1, r.y1, false);
+        paintCells(cells, paintTileValue, effectiveTool === 'eraser' ? 'Erase rectangle' : 'Fill rectangle');
+        setPreviewRect(null);
+        return;
+      }
       if (effectiveTool === 'brush' || effectiveTool === 'eraser') {
         commitPaintMap(effectiveTool === 'eraser' ? 'Erase' : 'Paint');
         return;
@@ -460,30 +482,35 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
       if (effectiveTool === 'transect') {
         addTransect(start, clamped);
         setPreviewRect(null);
+        return;
+      }
+      if (effectiveTool === 'barrier') {
+        const line = rasterLine(start.x, start.y, clamped.x, clamped.y);
+        const cells = applyBrushSize(line, brushSize);
+        addBarrier(cells);
+        setPreviewRect(null);
+        return;
+      }
+      if (effectiveTool === 'vehicle_bay') {
+        const r = rectFromDrag(start, clamped, dragRef.current.shift);
+        const isClick = r.x1 - r.x0 < 1 && r.y1 - r.y0 < 1;
+        const [defaultW, defaultH] = vehicleTypeFootprints[vehicleBayType].footprintCells;
+        const w = isClick ? defaultW : r.x1 - r.x0 + 1;
+        const h = isClick ? defaultH : r.y1 - r.y0 + 1;
+        addVehicleBay(r.x0, r.y0, w, h);
+        setPreviewRect(null);
       }
     },
-    [addArrowStroke, addEntrance, addStall, addTransect, brushSize, commitPaintMap, entranceType, getCellFromEvent, height, paintCells, paintTileValue, stallFrontEdge, stallSize, tool, width],
+    [addArrowStroke, addBarrier, addEntrance, addStall, addTransect, addVehicleBay, brushSize, commitPaintMap, entranceType, getCellFromEvent, height, paintCells, paintTileValue, stallFrontEdge, stallSize, tool, vehicleBayType, vehicleTypeFootprints, width],
   );
 
-  // Keyboard: tool hotkeys (contextual override for R/F while placing), delete, grid toggle, brush size, arrow-rect commit.
+  // Keyboard: number keys 1-8 pick a hotbar block (V = select), delete, grid
+  // toggle, brush size, and contextual R/F while placing an arrow or stall.
   useEffect(() => {
     function onKeyDown(e: KeyboardEvent) {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return;
       if (e.code === 'Space') {
         spaceHeldRef.current = true;
-        return;
-      }
-      if (pendingArrowRect && ARROW_KEY_DIR[e.key] !== undefined) {
-        e.preventDefault();
-        const dirCode = ARROW_KEY_DIR[e.key];
-        const r = pendingArrowRect;
-        const cells = rasterRect(r.x0, r.y0, r.x1, r.y1, false).map((c) => ({ x: c.x, y: c.y, value: dirCode }));
-        addArrowStroke(cells);
-        setPendingArrowRect(null);
-        return;
-      }
-      if (e.key === 'Escape') {
-        setPendingArrowRect(null);
         return;
       }
       if (e.key.toLowerCase() === 'r') {
@@ -514,28 +541,12 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
       if (e.key === '[') setBrushSize(Math.max(1, brushSize - 1));
       if (e.key === ']') setBrushSize(Math.min(5, brushSize + 1));
       if (e.key === '0') setViewport(fitToScreen(width, height, containerRef.current));
-      for (let n = 1; n <= 5; n++) {
-        if (e.key === String(n)) {
-          const layers = ['terrain', 'object', 'flow', 'zone', 'background'] as const;
-          toggleLayerVisible(layers[n - 1]);
-        }
+      if (e.key.toLowerCase() === 'v') {
+        setActiveBlock(PRIMARY_BLOCKS[0]);
+        return;
       }
-      const hotkeys: Record<string, typeof tool> = {
-        v: 'select',
-        b: 'brush',
-        r: 'rect',
-        l: 'line',
-        f: 'fill',
-        e: 'eraser',
-        i: 'eyedropper',
-        a: 'arrow',
-        s: 'stall',
-        n: 'entrance',
-        m: 'measure',
-        t: 'transect',
-      };
-      const mapped = hotkeys[e.key.toLowerCase()];
-      if (mapped) setTool(mapped);
+      const block = PRIMARY_BLOCKS.find((b) => b.hotkey === e.key);
+      if (block) setActiveBlock(block);
     }
     function onKeyUp(e: KeyboardEvent) {
       if (e.code === 'Space') spaceHeldRef.current = false;
@@ -546,7 +557,7 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [tool, brushSize, selectedObjectId, pendingArrowRect, width, height, addArrowStroke, deleteSelectedObject, flipStallFrontEdge, rotateArrowDir, rotateStallFootprint, setBrushSize, setTool, toggleGrid, toggleLayerVisible]);
+  }, [tool, brushSize, selectedObjectId, width, height, deleteSelectedObject, flipStallFrontEdge, rotateArrowDir, rotateStallFootprint, setActiveBlock, setBrushSize, toggleGrid]);
 
   // Fit to screen once on mount.
   useEffect(() => {
@@ -620,7 +631,7 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
   );
 
   return (
-    <div ref={containerRef} className="relative h-full w-full overflow-hidden bg-neutral-200">
+    <div ref={containerRef} className="relative h-full w-full overflow-hidden" style={{ background: '#F5F3EC' }}>
       <canvas
         ref={canvasRef}
         className="block h-full w-full cursor-crosshair touch-none"
@@ -629,11 +640,15 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
         onPointerUp={onPointerUp}
         onContextMenu={(e) => e.preventDefault()}
       />
-      <div className="pointer-events-none absolute bottom-0 left-0 right-0 flex items-center gap-3 bg-white/90 px-3 py-1 text-xs text-neutral-600">
+      <div
+        className="pointer-events-none absolute bottom-3 right-3 flex items-center gap-2 rounded-full px-3 py-1 text-[11px] text-neutral-500 shadow-sm"
+        style={{ background: 'rgba(255,255,255,0.85)', border: '1px solid var(--color-border)', backdropFilter: 'blur(4px)' }}
+      >
         <span>
-          {hoverCell ? `(${hoverCell.x}, ${hoverCell.y})` : '—'} {footerTile ? `· ${footerTile.name}` : ''}
+          {hoverCell ? `(${hoverCell.x}, ${hoverCell.y})` : '—'} {footerTile && footerTile.name !== 'Open ground' ? `· ${footerTile.name}` : ''}
         </span>
-        <span className="ml-auto">Zoom {viewport.zoom.toFixed(1)}px/cell</span>
+        <span className="text-neutral-300">|</span>
+        <span>{Math.round(viewport.zoom)}px/cell</span>
       </div>
       {calibDialog}
     </div>
@@ -662,9 +677,10 @@ function ghostCells(_tool: string, hover: XY, brushSize: number, _stallSize: { w
 }
 
 function fitToScreen(width: number, height: number, el: HTMLDivElement | null): Viewport {
-  const cw = el?.clientWidth ?? 800;
-  const ch = el?.clientHeight ?? 600;
-  const zoom = Math.max(2, Math.min(cw / width, ch / height, 16));
+  const cw = el?.clientWidth ?? 900;
+  const ch = el?.clientHeight ?? 700;
+  // Prefer chunky 32px cells; only shrink below that for a grid too big to fit.
+  const zoom = Math.max(4, Math.min(cw / width, ch / height, 32));
   const originX = (cw - width * zoom) / 2;
   const originY = (ch - height * zoom) / 2;
   return { originX, originY, zoom };

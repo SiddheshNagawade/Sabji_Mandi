@@ -2,6 +2,28 @@
 
 :root {
   color-scheme: light;
+
+  --color-bg: #f6f5f1;
+  --color-surface: #ffffff;
+  --color-surface-2: #fbfaf7;
+  --color-border: #e7e4dc;
+  --color-border-strong: #d8d4c8;
+  --color-text: #1d1b17;
+  --color-text-muted: #6f6b62;
+  --color-text-faint: #a4a096;
+  --color-accent: #3a5fe0;
+  --color-accent-hover: #2e4fc4;
+  --color-accent-soft: #eaeefc;
+  --color-danger: #c9483a;
+  --color-success: #2e9e6c;
+
+  --shadow-sm: 0 1px 2px rgba(24, 20, 12, 0.06);
+  --shadow-md: 0 6px 20px rgba(24, 20, 12, 0.10), 0 1px 3px rgba(24, 20, 12, 0.08);
+  --shadow-lg: 0 16px 44px rgba(24, 20, 12, 0.16), 0 2px 8px rgba(24, 20, 12, 0.08);
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
 }
 
 html,
@@ -13,12 +35,15 @@ body,
 
 body {
   font-family:
+    'Inter',
     system-ui,
     'Segoe UI',
     Roboto,
     sans-serif;
-  color: #1a1a1a;
-  background: #f2efe6;
+  font-feature-settings: 'ss01' 1, 'cv05' 1;
+  -webkit-font-smoothing: antialiased;
+  color: var(--color-text);
+  background: var(--color-bg);
 }
 
 canvas {
@@ -27,4 +52,27 @@ canvas {
 
 * {
   box-sizing: border-box;
+}
+
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-strong);
+  border-radius: 8px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
+
+button {
+  cursor: pointer;
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
 }

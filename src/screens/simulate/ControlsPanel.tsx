@@ -8,6 +8,8 @@ const HEAT_MODES: { id: HeatMode; label: string }[] = [
   { id: 'density', label: 'Density (LoS)' },
   { id: 'footfall', label: 'Footfall' },
   { id: 'stuck', label: 'Stuck time' },
+  { id: 'vehicleBlock', label: 'Vehicle blocking' },
+  { id: 'conflict', label: 'Conflicts' },
 ];
 
 export function ControlsPanel() {
@@ -80,6 +82,11 @@ export function ControlsPanel() {
         <div>
           Skipped: {metrics.skippedQueue} queue, {metrics.skippedBlocked} blocked
         </div>
+        <div className="mt-1 border-t border-neutral-100 pt-1">
+          Vehicles in market: {metrics.vehiclesInMarket} ({metrics.vehiclesSpawned} spawned, {metrics.vehiclesDespawned} despawned)
+        </div>
+        <div>Failed unloads: {metrics.vehiclesFailedUnloads}</div>
+        <div>Pedestrian-vehicle conflicts: {metrics.vehicleConflicts}</div>
       </div>
     </div>
   );

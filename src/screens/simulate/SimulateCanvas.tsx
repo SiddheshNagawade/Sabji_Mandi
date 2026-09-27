@@ -5,7 +5,7 @@ import { useSimStore } from '../../app/simStore';
 import type { XY } from '../../data/schema';
 import type { Viewport } from '../../viz/renderTiles';
 import { cellToScreen, drawScene, screenToCell } from '../../viz/renderTiles';
-import { drawAgents, drawTrails } from '../../viz/renderAgents';
+import { drawAgents, drawTrails, drawVehicles } from '../../viz/renderAgents';
 import { drawHeatOverlay } from '../../viz/renderHeatmap';
 import { objectAtCell } from '../../editor/objectLayer';
 import { inBounds } from '../../editor/grid';
@@ -26,6 +26,8 @@ export function SimulateCanvas() {
 
   const positions = useSimStore((s) => s.positions);
   const agentIds = useSimStore((s) => s.agentIds);
+  const vehiclePositions = useSimStore((s) => s.vehiclePositions);
+  const vehicleIds = useSimStore((s) => s.vehicleIds);
   const heat = useSimStore((s) => s.heat);
   const heatMode = useSimStore((s) => s.heatMode);
   const showTrails = useSimStore((s) => s.showTrails);
@@ -33,6 +35,7 @@ export function SimulateCanvas() {
   const inspectAgent = useSimStore((s) => s.inspectAgent);
   const inspectStall = useSimStore((s) => s.inspectStall);
   const inspectCell = useSimStore((s) => s.inspectCell);
+  const inspectVehicle = useSimStore((s) => s.inspectVehicle);
   const cellSizeM = useSimStore((s) => s.cellSizeM);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -88,12 +91,22 @@ export function SimulateCanvas() {
       selectedObjectId: inspect?.kind === 'stall' ? (inspect.id as number) : null,
     });
     if (heat && heatMode !== 'agents') {
-      const values = heatMode === 'density' ? computeLiveDensity(positions, width, height, cellSizeM) : heatMode === 'footfall' ? heat.passCount : heat.stuckSeconds;
+      const values =
+        heatMode === 'density'
+          ? computeLiveDensity(positions, width, height, cellSizeM)
+          : heatMode === 'footfall'
+            ? heat.passCount
+            : heatMode === 'stuck'
+              ? heat.stuckSeconds
+              : heatMode === 'vehicleBlock'
+                ? heat.vehicleBlockSeconds
+                : heat.conflictCount;
       drawHeatOverlay(ctx, heatMode, values, width, height, viewport, 0.6);
     }
     if (showTrails) drawTrails(ctx, trailsRef.current, viewport);
+    drawVehicles(ctx, vehiclePositions, viewport, inspect?.kind === 'vehicle' ? (inspect.id as number) : null, vehicleIds);
     drawAgents(ctx, positions, viewport, inspect?.kind === 'agent' ? (inspect.id as number) : null, agentIds);
-  }, [layout, width, height, viewport, positions, agentIds, heat, heatMode, showTrails, inspect, cellSizeM]);
+  }, [layout, width, height, viewport, positions, agentIds, vehiclePositions, vehicleIds, heat, heatMode, showTrails, inspect, cellSizeM]);
 
   const onWheel = useCallback((e: ReactWheelEvent<HTMLCanvasElement>) => {
     const canvas = canvasRef.current;
@@ -148,6 +161,21 @@ export function SimulateCanvas() {
       inspectAgent(bestId);
       return;
     }
+
+    // then vehicles (click anywhere inside their footprint rectangle)
+    const vehicleCount = vehiclePositions.length / 6;
+    for (let i = 0; i < vehicleCount; i++) {
+      const anchorX = vehiclePositions[i * 6];
+      const anchorY = vehiclePositions[i * 6 + 1];
+      const w = vehiclePositions[i * 6 + 2];
+      const h = vehiclePositions[i * 6 + 3];
+      const topLeft = cellToScreen(viewport, anchorX, anchorY);
+      if (sx >= topLeft.x && sx <= topLeft.x + w * viewport.zoom && sy >= topLeft.y && sy <= topLeft.y + h * viewport.zoom) {
+        inspectVehicle(vehicleIds[i]);
+        return;
+      }
+    }
+
     const cell = screenToCell(viewport, sx, sy);
     if (!inBounds(cell.x, cell.y, width, height)) return;
     const obj = objectAtCell(layout, width, height, cell.x, cell.y);
@@ -156,7 +184,7 @@ export function SimulateCanvas() {
     } else {
       inspectCell(cell.x, cell.y);
     }
-  }, [positions, agentIds, viewport, width, height, layout, inspectAgent, inspectStall, inspectCell]);
+  }, [positions, agentIds, vehiclePositions, vehicleIds, viewport, width, height, layout, inspectAgent, inspectStall, inspectCell, inspectVehicle]);
 
   const onPointerMove = useCallback((e: ReactPointerEvent<HTMLCanvasElement>) => {
     if (!panRef.current.active) return;

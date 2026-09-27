@@ -7,8 +7,8 @@ import type { Project } from '../../data/schema';
 import { World } from '../core/world';
 import { isRunComplete, step } from '../core/tick';
 import { idx } from '../core/walkable';
-import { BUYER_STATE_CODE } from './protocol';
-import type { AgentDetail, CellDetail, DoneMessage, FrameMessage, HeatMessage, MetricsMessage, StallDetail, WorkerCommand, WorkerMessage } from './protocol';
+import { BUYER_STATE_CODE, VEHICLE_STATE_CODE, VEHICLE_TYPE_CODE } from './protocol';
+import type { AgentDetail, CellDetail, DoneMessage, FrameMessage, HeatMessage, MetricsMessage, StallDetail, VehicleDetail, WorkerCommand, WorkerMessage } from './protocol';
 
 const FRAME_MS = 1000 / 30;
 const HEAT_MS = 1000 / 5;
@@ -64,6 +64,9 @@ export class SimRunner {
           break;
         case 'inspectCell':
           this.inspectCell(cmd.x, cmd.y);
+          break;
+        case 'inspectVehicle':
+          this.inspectVehicle(cmd.vehicleId);
           break;
       }
     } catch (err) {
@@ -174,6 +177,27 @@ export class SimRunner {
     this.post({ type: 'cellDetail', x, y, detail });
   }
 
+  private inspectVehicle(vehicleId: number) {
+    const world = this.world;
+    if (!world) return;
+    const v = world.vehicles.get(vehicleId);
+    if (!v) {
+      this.post({ type: 'vehicleDetail', vehicleId, found: false });
+      return;
+    }
+    const detail: VehicleDetail = {
+      id: v.id,
+      vehicleType: v.vehicleType,
+      state: v.state,
+      targetBayId: v.targetBayId,
+      dwellRemainingS: v.dwellRemainingS,
+      waitTicks: v.waitTicks,
+      timeInMarketS: world.t - v.spawnT,
+      failedUnload: v.failedUnload,
+    };
+    this.post({ type: 'vehicleDetail', vehicleId, found: true, detail });
+  }
+
   private tick() {
     const world = this.world;
     if (!world) return;
@@ -211,7 +235,19 @@ export class SimRunner {
       positions[i * 4 + 3] = a.blockedTicks > 0 ? 1 : 0;
       agentIds[i] = a.id;
     });
-    const msg: FrameMessage = { type: 'frame', t: world.t, positions, agentIds, running: this.intervalId != null };
+    const vehicles = Array.from(world.vehicles.values());
+    const vehiclePositions = new Float32Array(vehicles.length * 6);
+    const vehicleIds = new Int32Array(vehicles.length);
+    vehicles.forEach((v, i) => {
+      vehiclePositions[i * 6] = v.anchorX;
+      vehiclePositions[i * 6 + 1] = v.anchorY;
+      vehiclePositions[i * 6 + 2] = v.footprintW;
+      vehiclePositions[i * 6 + 3] = v.footprintH;
+      vehiclePositions[i * 6 + 4] = VEHICLE_TYPE_CODE[v.vehicleType];
+      vehiclePositions[i * 6 + 5] = VEHICLE_STATE_CODE[v.state] ?? -1;
+      vehicleIds[i] = v.id;
+    });
+    const msg: FrameMessage = { type: 'frame', t: world.t, positions, agentIds, vehiclePositions, vehicleIds, running: this.intervalId != null };
     this.post(msg);
   }
 
@@ -223,6 +259,8 @@ export class SimRunner {
       occupancySeconds: world.heat.occupancySeconds.slice(),
       passCount: world.heat.passCount.slice(),
       stuckSeconds: world.heat.stuckSeconds.slice(),
+      vehicleBlockSeconds: world.heat.vehicleBlockSeconds.slice(),
+      conflictCount: world.heat.conflictCount.slice(),
     };
     this.post(msg);
   }
@@ -237,6 +275,11 @@ export class SimRunner {
       despawned: world.metrics.despawned,
       skippedQueue: world.metrics.skipped.queue,
       skippedBlocked: world.metrics.skipped.blocked,
+      vehiclesInMarket: world.vehicles.size,
+      vehiclesSpawned: world.vehicleMetrics.spawned,
+      vehiclesDespawned: world.vehicleMetrics.despawned,
+      vehiclesFailedUnloads: world.vehicleMetrics.failedUnloads,
+      vehicleConflicts: world.vehicleMetrics.conflicts,
     };
   }
 

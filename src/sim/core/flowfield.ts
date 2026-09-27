@@ -149,4 +149,10 @@ export class FlowFieldCache {
   clear() {
     this.fields.clear();
   }
+
+  /** Swaps in new terrain/flow (e.g. after a phase change) and drops every cached field, which was computed against the old ones. */
+  updateGrids(grids: FlowFieldGrids) {
+    this.grids = grids;
+    this.clear();
+  }
 }

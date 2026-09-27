@@ -3,8 +3,15 @@
 // crisp edges.
 
 import type { Layout, LayoutObject, Stall, XY } from '../data/schema';
-import { FLOW_DIRS, PRODUCE_COLORS, TILE_INFO } from '../data/schema';
+import { FLOW_DIRS, PRODUCE_COLORS, TILE_INFO, TileId } from '../data/schema';
 import { ARROW_COLOR, ENTRANCE_BOTH_COLOR, ENTRANCE_IN_COLOR, ENTRANCE_OUT_COLOR, LOCKED_OVERLAY_COLOR, SELECTION_COLOR, SHADE_OVERLAY_COLOR, TRANSECT_COLOR } from './palettes';
+
+// Blocks are rendered translucent (a clean, Minecraft-block-on-paper look)
+// rather than fully opaque; open ground isn't painted at all, so an
+// untouched cell just shows the canvas paper colour underneath.
+const TERRAIN_ALPHA = 0.6;
+const OBJECT_ALPHA = 0.62;
+export const CANVAS_PAPER_COLOR = '#F5F3EC';
 
 export interface Viewport {
   originX: number; // screen px of cell (0,0)'s top-left corner
@@ -46,7 +53,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, layout: Layout, width: 
   const canvas = ctx.canvas;
   ctx.imageSmoothingEnabled = false;
   ctx.clearRect(0, 0, canvas.width, canvas.height);
-  ctx.fillStyle = '#cfcabb';
+  ctx.fillStyle = CANVAS_PAPER_COLOR;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
   if (opts.layerVisible.background && opts.backgroundImageEl) {
@@ -64,10 +71,14 @@ export function drawScene(ctx: CanvasRenderingContext2D, layout: Layout, width: 
     for (let y = y0; y <= y1; y++) {
       for (let x = x0; x <= x1; x++) {
         const i = y * width + x;
-        const tile = TILE_INFO[layout.terrain[i]];
+        const tileId = layout.terrain[i];
+        if (tileId === TileId.OpenGround) continue; // untouched cell: show the paper underneath
+        const tile = TILE_INFO[tileId];
         const p = cellToScreen(viewport, x, y);
+        ctx.globalAlpha = TERRAIN_ALPHA;
         ctx.fillStyle = tile.color;
         ctx.fillRect(p.x, p.y, z, z);
+        ctx.globalAlpha = 1;
         if (tile.pattern === 'diagonal') {
           ctx.strokeStyle = 'rgba(0,0,0,0.25)';
           ctx.lineWidth = 1;
@@ -160,7 +171,7 @@ export function drawScene(ctx: CanvasRenderingContext2D, layout: Layout, width: 
   }
 
   if (opts.showGrid && z >= 6) {
-    ctx.strokeStyle = 'rgba(0,0,0,0.08)';
+    ctx.strokeStyle = 'rgba(30,26,18,0.10)';
     ctx.lineWidth = 1;
     for (let x = x0; x <= x1 + 1; x++) {
       const p = cellToScreen(viewport, x, y0);
@@ -234,7 +245,7 @@ function drawObject(ctx: CanvasRenderingContext2D, obj: LayoutObject, v: Viewpor
     for (const c of obj.cells) {
       const p = cellToScreen(v, c.x, c.y);
       ctx.fillStyle = color;
-      ctx.globalAlpha = 0.55;
+      ctx.globalAlpha = OBJECT_ALPHA;
       ctx.fillRect(p.x, p.y, z, z);
       ctx.globalAlpha = 1;
     }
@@ -243,8 +254,10 @@ function drawObject(ctx: CanvasRenderingContext2D, obj: LayoutObject, v: Viewpor
   }
   if (obj.kind === 'vehicle_bay') {
     const { minX, minY, maxX, maxY } = polygonFromCells(v, obj.cells);
-    ctx.fillStyle = 'rgba(77,124,199,0.35)';
+    ctx.globalAlpha = OBJECT_ALPHA;
+    ctx.fillStyle = '#4D7CC7';
     ctx.fillRect(minX, minY, maxX - minX, maxY - minY);
+    ctx.globalAlpha = 1;
     if (selected) strokeBounds(ctx, { minX, minY, maxX, maxY });
     return;
   }
@@ -303,8 +316,10 @@ function drawObject(ctx: CanvasRenderingContext2D, obj: LayoutObject, v: Viewpor
 function drawStall(ctx: CanvasRenderingContext2D, stall: Stall, v: Viewport, selected: boolean) {
   const bounds = polygonFromCells(v, stall.cells);
   const color = PRODUCE_COLORS[stall.produce[0] ?? 'mixed_other'];
+  ctx.globalAlpha = OBJECT_ALPHA;
   ctx.fillStyle = color;
   ctx.fillRect(bounds.minX, bounds.minY, bounds.maxX - bounds.minX, bounds.maxY - bounds.minY);
+  ctx.globalAlpha = 1;
   ctx.strokeStyle = 'rgba(0,0,0,0.5)';
   ctx.lineWidth = 1;
   ctx.strokeRect(bounds.minX + 0.5, bounds.minY + 0.5, bounds.maxX - bounds.minX - 1, bounds.maxY - bounds.minY - 1);

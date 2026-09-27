@@ -75,7 +75,8 @@ export function proposeMove(world: World, buyer: Buyer): Proposal | null {
     if (!inBounds(nx, ny, world.width, world.height)) continue;
     const ncell = idx(nx, ny, world.width);
     if (world.stationaryMask[ncell]) continue;
-    if (!canStepPed(world.terrain, world.flow, world.width, world.height, buyer.cell, ncell, buyer.obeysArrows)) continue;
+    if (!canStepPed(world.resolvedTerrain, world.resolvedFlow, world.width, world.height, buyer.cell, ncell, buyer.obeysArrows)) continue;
+    if (world.vehicleOccupant[ncell] !== -1) continue; // vehicles are hard obstacles for pedestrians too
     const fv = field[ncell];
     if (!Number.isFinite(fv)) continue;
     const occPenalty = world.occupantAgentId[ncell] !== -1 ? world.params.occupancyPenaltyWeight.value : 0;

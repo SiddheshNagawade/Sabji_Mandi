@@ -5,8 +5,10 @@ import { assumed } from './schema';
 import type { CalibrationSet, Demand, Layout, Project, SimParams } from './schema';
 import { SCHEMA_VERSION } from './schema';
 
-export const DEFAULT_GRID_WIDTH = 160;
-export const DEFAULT_GRID_HEIGHT = 120;
+// A new project starts small and chunky at the default 32px/cell zoom, then
+// grows to the right/down as you draw near its edge (see editor/growGrid.ts).
+export const DEFAULT_GRID_WIDTH = 24;
+export const DEFAULT_GRID_HEIGHT = 18;
 export const DEFAULT_CELL_SIZE_M = 0.5;
 
 export function createEmptyLayout(width: number, height: number): Layout {

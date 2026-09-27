@@ -1,12 +1,16 @@
 import { create } from 'zustand';
-import type { CellChange, Dir4, EntranceType, Layout, LayoutObject, Project, ProduceCategory, XY } from '../data/schema';
+import type { CellChange, Dir4, EntranceType, Layout, LayoutObject, Phase, Project, ProduceCategory, VehicleType, XY } from '../data/schema';
 import { createBlankProject } from '../data/defaults';
 import { downloadProjectFile, readProjectFile, saveAutosave } from '../data/io';
 import { rebuildObjectLayer } from '../editor/objectLayer';
+import type { BlockDef } from '../editor/blocks';
+import { growLayout } from '../editor/growGrid';
 import {
+  buildAddBarrierCommand,
   buildAddEntranceCommand,
   buildAddStallCommand,
   buildAddTransectCommand,
+  buildAddVehicleBayCommand,
   buildDeleteObjectCommand,
   buildMultiValuePaintCommand,
   buildPaintCommand,
@@ -40,7 +44,9 @@ export type EditorTool =
   | 'stall'
   | 'entrance'
   | 'measure'
-  | 'transect';
+  | 'transect'
+  | 'barrier'
+  | 'vehicle_bay';
 
 interface AppState {
   project: Project;
@@ -50,6 +56,7 @@ interface AppState {
   layoutVersion: number;
 
   // Editor UI state
+  activeBlockId: string;
   tool: EditorTool;
   paintLayer: PaintLayer;
   brushTileId: number;
@@ -59,6 +66,7 @@ interface AppState {
   stallFrontEdge: Dir4;
   stallProduce: ProduceCategory[];
   entranceType: EntranceType;
+  vehicleBayType: VehicleType;
   layerVisible: Record<LayerName | 'background', boolean>;
   layerLocked: Record<LayerName, boolean>;
   selectedObjectId: number | null;
@@ -78,6 +86,7 @@ interface AppState {
   undo: () => void;
   redo: () => void;
 
+  setActiveBlock: (block: BlockDef) => void;
   setTool: (tool: EditorTool) => void;
   setPaintLayer: (layer: PaintLayer) => void;
   setBrushTile: (tileId: number) => void;
@@ -89,6 +98,7 @@ interface AppState {
   flipStallFrontEdge: () => void;
   setStallProduce: (produce: ProduceCategory[]) => void;
   setEntranceType: (type: EntranceType) => void;
+  setVehicleBayType: (type: VehicleType) => void;
   toggleLayerVisible: (layer: LayerName | 'background') => void;
   toggleLayerLocked: (layer: LayerName) => void;
   setSelectedObjectId: (id: number | null) => void;
@@ -99,6 +109,8 @@ interface AppState {
   addStall: (x0: number, y0: number, w: number, h: number, frontEdge: Dir4) => void;
   addEntrance: (cells: XY[], type: EntranceType) => void;
   addTransect: (a: XY, b: XY) => void;
+  addBarrier: (cells: XY[]) => void;
+  addVehicleBay: (x0: number, y0: number, w: number, h: number) => void;
   deleteSelectedObject: () => void;
   updateSelectedObject: (updater: (obj: LayoutObject) => LayoutObject) => void;
 
@@ -111,6 +123,13 @@ interface AppState {
   clearCalibration: () => void;
   applyCalibration: (realMetres: number) => void;
   setFocusCell: (cell: XY | null) => void;
+
+  addPhase: (name: string, startS: number, endS: number) => void;
+  updatePhase: (id: number, updater: (phase: Phase) => Phase) => void;
+  deletePhase: (id: number) => void;
+
+  /** Grows the grid to at least newWidth x newHeight, preserving all content. No-op if already that size or larger. */
+  growGrid: (newWidth: number, newHeight: number) => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -120,6 +139,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   historyIndex: 0,
   layoutVersion: 0,
 
+  activeBlockId: 'select',
   tool: 'select',
   paintLayer: 'terrain',
   brushTileId: 0,
@@ -129,6 +149,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   stallFrontEdge: 'S',
   stallProduce: ['mixed_other'],
   entranceType: 'ped_in',
+  vehicleBayType: 'handcart',
   layerVisible: { terrain: true, object: true, flow: true, flowGroup: true, zone: false, shade: true, locked: true, background: true },
   layerLocked: { terrain: false, object: false, flow: false, flowGroup: false, zone: false, shade: false, locked: false },
   selectedObjectId: null,
@@ -218,6 +239,35 @@ export const useAppStore = create<AppState>((set, get) => ({
     void get().autosave();
   },
 
+  setActiveBlock: (block) => {
+    set({ activeBlockId: block.id, selectedObjectId: null });
+    switch (block.category) {
+      case 'select':
+        set({ tool: 'select' });
+        break;
+      case 'erase':
+        set({ tool: 'eraser' });
+        break;
+      case 'terrain':
+        set({ tool: 'brush', paintLayer: 'terrain', brushTileId: block.tileId ?? 0 });
+        break;
+      case 'stall':
+        set({ tool: 'stall' });
+        break;
+      case 'entrance':
+        set({ tool: 'entrance' });
+        break;
+      case 'barrier':
+        set({ tool: 'barrier' });
+        break;
+      case 'vehicle_bay':
+        set({ tool: 'vehicle_bay' });
+        break;
+      case 'arrow':
+        set({ tool: 'arrow' });
+        break;
+    }
+  },
   setTool: (tool) => set({ tool, selectedObjectId: null }),
   setPaintLayer: (paintLayer) => set({ paintLayer }),
   setBrushTile: (tileId) => set({ brushTileId: tileId }),
@@ -229,6 +279,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   flipStallFrontEdge: () => set((s) => ({ stallFrontEdge: nextEdge(s.stallFrontEdge) })),
   setStallProduce: (produce) => set({ stallProduce: produce }),
   setEntranceType: (entranceType) => set({ entranceType }),
+  setVehicleBayType: (vehicleBayType) => set({ vehicleBayType }),
   toggleLayerVisible: (layer) => set((s) => ({ layerVisible: { ...s.layerVisible, [layer]: !s.layerVisible[layer] } })),
   toggleLayerLocked: (layer) => set((s) => ({ layerLocked: { ...s.layerLocked, [layer]: !s.layerLocked[layer] } })),
   setSelectedObjectId: (id) => set({ selectedObjectId: id }),
@@ -261,6 +312,16 @@ export const useAppStore = create<AppState>((set, get) => ({
   addTransect: (a, b) => {
     const { project } = get();
     get().applyCommand(buildAddTransectCommand(project.baseline, a, b, nextObjectId(project.baseline)));
+  },
+
+  addBarrier: (cells) => {
+    const { project } = get();
+    get().applyCommand(buildAddBarrierCommand(project.baseline, project.grid.width, project.grid.height, cells, nextObjectId(project.baseline)));
+  },
+
+  addVehicleBay: (x0, y0, w, h) => {
+    const { project, vehicleBayType } = get();
+    get().applyCommand(buildAddVehicleBayCommand(project.baseline, project.grid.width, project.grid.height, x0, y0, w, h, vehicleBayType, nextObjectId(project.baseline)));
   },
 
   deleteSelectedObject: () => {
@@ -322,6 +383,44 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
   },
   setFocusCell: (cell) => set({ focusCell: cell }),
+
+  addPhase: (name, startS, endS) => {
+    const { project } = get();
+    const layout = project.baseline;
+    const id = layout.phases.reduce((max, p) => Math.max(max, p.id), 0) + 1;
+    const phase: Phase = { id, name, startS, endS, activeBarrierIds: [], activeArrowGroupIds: [], vehiclesAllowed: false, vehiclesBaysOnly: false, openEntranceIds: [], wasteClearing: false };
+    layout.phases = [...layout.phases, phase].sort((a, b) => a.startS - b.startS);
+    set({ project: { ...project }, layoutVersion: get().layoutVersion + 1 });
+  },
+
+  updatePhase: (id, updater) => {
+    const { project } = get();
+    const layout = project.baseline;
+    layout.phases = layout.phases.map((p) => (p.id === id ? updater(p) : p));
+    set({ project: { ...project }, layoutVersion: get().layoutVersion + 1 });
+  },
+
+  deletePhase: (id) => {
+    const { project } = get();
+    const layout = project.baseline;
+    layout.phases = layout.phases.filter((p) => p.id !== id);
+    set({ project: { ...project }, layoutVersion: get().layoutVersion + 1 });
+  },
+
+  growGrid: (newWidth, newHeight) => {
+    const { project } = get();
+    const oldWidth = project.grid.width;
+    const oldHeight = project.grid.height;
+    const width = Math.max(oldWidth, newWidth);
+    const height = Math.max(oldHeight, newHeight);
+    if (width === oldWidth && height === oldHeight) return;
+    const grown = growLayout(project.baseline, oldWidth, oldHeight, width, height);
+    set({
+      project: { ...project, grid: { ...project.grid, width, height }, baseline: grown },
+      layoutVersion: get().layoutVersion + 1,
+    });
+    void get().autosave();
+  },
 }));
 
 function nextEdge(edge: Dir4): Dir4 {
