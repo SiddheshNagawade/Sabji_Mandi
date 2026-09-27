@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import type { Project, ProvenanceTag } from '../data/schema';
 import type { ProjectSummary } from '../data/projectLibrary';
 import { listProjectSummaries, loadProjectFromLibrary } from '../data/projectLibrary';
@@ -6,7 +6,35 @@ import { countProvenance } from '../data/provenance';
 import type { LayoutStats } from '../data/layoutStats';
 import { computeLayoutStats } from '../data/layoutStats';
 import { computeLintWarnings } from '../editor/layoutLinter';
+import { fitToScreen } from '../editor/viewport';
+import { drawScene } from '../viz/renderTiles';
+import { drawAgents, drawVehicles } from '../viz/renderAgents';
 import type { WorkerMessage } from '../sim/worker/protocol';
+
+interface RunProgress {
+  t: number;
+  spawned: number;
+  peopleInMarket: number;
+}
+
+interface RunFrame {
+  positions: Float32Array;
+  agentIds: Int32Array;
+  vehiclePositions: Float32Array;
+  vehicleIds: Int32Array;
+}
+
+/** Drops calls closer together than `ms`, so a fast stream of worker messages doesn't flood React with renders. */
+function throttled<T extends (...args: never[]) => void>(fn: T, ms: number): T {
+  let last = 0;
+  return ((...args: Parameters<T>) => {
+    const now = performance.now();
+    if (now - last >= ms) {
+      last = now;
+      fn(...args);
+    }
+  }) as T;
+}
 
 interface RunResult {
   status: 'running' | 'done' | 'error';
@@ -32,24 +60,50 @@ const ZERO: Omit<RunResult, 'status'> = {
   meanTimeInMarketS: null,
 };
 
-function runHeadless(project: Project): Promise<RunResult> {
+// The worker already posts 'metrics' and 'frame' messages many times a
+// second while it runs (that's how the live Simulate screen animates) — a
+// headless run just never used to listen for them. Doing so gives real
+// progress feedback, and lets the timeout be "no message for a while"
+// (the run is genuinely stuck) rather than a flat wall-clock cap that fires
+// on a run that's simply large and still actively progressing.
+const INACTIVITY_TIMEOUT_MS = 20_000;
+const HARD_CEILING_MS = 5 * 60_000;
+
+function runHeadless(project: Project, onProgress: (p: RunProgress) => void, onFrame: (f: RunFrame) => void): Promise<RunResult> {
   return new Promise((resolve) => {
     const worker = new Worker(new URL('../sim/worker/sim.worker.ts', import.meta.url), { type: 'module' });
-    const timeout = setTimeout(() => {
+    let inactivityTimer: ReturnType<typeof setTimeout>;
+    const hardCeiling = setTimeout(() => {
+      clearTimeout(inactivityTimer);
       worker.terminate();
-      resolve({ status: 'error', error: 'Timed out before the simulation finished.', ...ZERO });
-    }, 30_000);
-    worker.onerror = (e) => {
-      clearTimeout(timeout);
-      resolve({ status: 'error', error: e.message || 'The simulation worker crashed.', ...ZERO });
+      resolve({ status: 'error', error: 'This simulation is taking unusually long and was stopped.', ...ZERO });
+    }, HARD_CEILING_MS);
+    function settle(result: RunResult) {
+      clearTimeout(inactivityTimer);
+      clearTimeout(hardCeiling);
+      resolve(result);
       worker.terminate();
-    };
+    }
+    function armInactivityTimer() {
+      clearTimeout(inactivityTimer);
+      inactivityTimer = setTimeout(() => settle({ status: 'error', error: 'The simulation stopped responding.', ...ZERO }), INACTIVITY_TIMEOUT_MS);
+    }
+    armInactivityTimer();
+    worker.onerror = (e) => settle({ status: 'error', error: e.message || 'The simulation worker crashed.', ...ZERO });
     worker.onmessage = (e: MessageEvent<WorkerMessage>) => {
       const msg = e.data;
+      armInactivityTimer();
+      if (msg.type === 'metrics') {
+        onProgress({ t: msg.t, spawned: msg.spawned, peopleInMarket: msg.peopleInMarket });
+        return;
+      }
+      if (msg.type === 'frame') {
+        onFrame({ positions: msg.positions, agentIds: msg.agentIds, vehiclePositions: msg.vehiclePositions, vehicleIds: msg.vehicleIds });
+        return;
+      }
       if (msg.type === 'done') {
-        clearTimeout(timeout);
         const mean = msg.timesInMarket.length > 0 ? msg.timesInMarket.reduce((a, b) => a + b, 0) / msg.timesInMarket.length : null;
-        resolve({
+        settle({
           status: 'done',
           spawned: msg.finalMetrics.spawned,
           despawned: msg.finalMetrics.despawned,
@@ -60,11 +114,8 @@ function runHeadless(project: Project): Promise<RunResult> {
           vehicleConflicts: msg.finalMetrics.vehicleConflicts,
           meanTimeInMarketS: mean,
         });
-        worker.terminate();
       } else if (msg.type === 'error') {
-        clearTimeout(timeout);
-        resolve({ status: 'error', error: msg.message, ...ZERO });
-        worker.terminate();
+        settle({ status: 'error', error: msg.message, ...ZERO });
       }
     };
     worker.postMessage({ type: 'init', project, scenarioId: 'baseline', seed: 1 });
@@ -82,6 +133,10 @@ export function CompareScreen() {
   const [resultA, setResultA] = useState<RunResult | null>(null);
   const [resultB, setResultB] = useState<RunResult | null>(null);
   const [running, setRunning] = useState(false);
+  const [progressA, setProgressA] = useState<RunProgress | null>(null);
+  const [progressB, setProgressB] = useState<RunProgress | null>(null);
+  const [frameA, setFrameA] = useState<RunFrame | null>(null);
+  const [frameB, setFrameB] = useState<RunFrame | null>(null);
 
   useEffect(() => {
     void listProjectSummaries().then((list) => {
@@ -94,6 +149,8 @@ export function CompareScreen() {
   useEffect(() => {
     setResultA(null);
     setResultB(null);
+    setProgressA(null);
+    setFrameA(null);
     if (idA) void loadProjectFromLibrary(idA).then((p) => setProjectA(p ?? null));
     else setProjectA(null);
   }, [idA]);
@@ -101,6 +158,8 @@ export function CompareScreen() {
   useEffect(() => {
     setResultA(null);
     setResultB(null);
+    setProgressB(null);
+    setFrameB(null);
     if (idB) void loadProjectFromLibrary(idB).then((p) => setProjectB(p ?? null));
     else setProjectB(null);
   }, [idB]);
@@ -110,9 +169,23 @@ export function CompareScreen() {
     setRunning(true);
     setResultA({ status: 'running', ...ZERO });
     setResultB({ status: 'running', ...ZERO });
-    const [ra, rb] = await Promise.all([runHeadless(projectA), runHeadless(projectB)]);
+    setProgressA(null);
+    setProgressB(null);
+    setFrameA(null);
+    setFrameB(null);
+    // Throttled: the worker posts several messages a second, but a live progress bar
+    // and mini-preview only need updating a handful of times a second to read as "live".
+    const onProgressA = throttled(setProgressA, 150);
+    const onProgressB = throttled(setProgressB, 150);
+    const onFrameA = throttled(setFrameA, 150);
+    const onFrameB = throttled(setFrameB, 150);
+    const [ra, rb] = await Promise.all([runHeadless(projectA, onProgressA, onFrameA), runHeadless(projectB, onProgressB, onFrameB)]);
     setResultA(ra);
     setResultB(rb);
+    setProgressA(null);
+    setProgressB(null);
+    setFrameA(null);
+    setFrameB(null);
     setRunning(false);
   }
 
@@ -191,7 +264,13 @@ export function CompareScreen() {
                   {issuesB.length > 0 && `${summaryB.name} — ${issuesB[0].message}`}
                 </p>
               )}
-              {(resultA || resultB) && <ResultTable a={resultA} b={resultB} nameA={summaryA.name} nameB={summaryB.name} />}
+              {running && (
+                <div className="mt-3 grid grid-cols-2 gap-4">
+                  <RunProgressCard name={summaryA.name} project={projectA} progress={progressA} frame={frameA} />
+                  <RunProgressCard name={summaryB.name} project={projectB} progress={progressB} frame={frameB} />
+                </div>
+              )}
+              {!running && (resultA || resultB) && <ResultTable a={resultA} b={resultB} nameA={summaryA.name} nameB={summaryB.name} />}
             </div>
           </>
         )}
@@ -287,6 +366,73 @@ function StatTable({
         </tbody>
       </table>
     </div>
+  );
+}
+
+function formatSimClock(s: number): string {
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  return h > 0 ? `${h}h ${m}m` : `${m}m`;
+}
+
+function RunProgressCard({ name, project, progress, frame }: { name: string; project: Project | null; progress: RunProgress | null; frame: RunFrame | null }) {
+  const totalS = project ? Math.max(1, project.demand.hardStopS - project.demand.simStartS) : 1;
+  const elapsedS = progress ? Math.max(0, progress.t - (project?.demand.simStartS ?? 0)) : 0;
+  const pct = Math.min(100, Math.round((elapsedS / totalS) * 100));
+  return (
+    <div className="rounded-xl p-3" style={{ background: 'var(--color-bg)', border: '1px solid var(--color-border)' }}>
+      <div className="mb-1.5 flex items-center justify-between">
+        <span className="text-xs font-medium" style={{ color: 'var(--color-text)' }}>
+          {name}
+        </span>
+        <span className="text-[11px] tabular-nums" style={{ color: 'var(--color-text-muted)' }}>
+          {progress ? `${pct}% · ${formatSimClock(elapsedS)} of ${formatSimClock(totalS)} simulated` : 'starting…'}
+        </span>
+      </div>
+      <div className="mb-2 h-1.5 overflow-hidden rounded-full" style={{ background: 'var(--color-border)' }}>
+        <div className="h-full rounded-full transition-[width]" style={{ width: `${pct}%`, background: 'var(--color-accent)' }} />
+      </div>
+      {project && <MiniPreview project={project} frame={frame} />}
+      <p className="mt-1.5 text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+        {progress ? `${progress.peopleInMarket} in market now · ${progress.spawned} arrived so far` : 'Warming up the simulation…'}
+      </p>
+    </div>
+  );
+}
+
+const MINI_PREVIEW_W = 240;
+const MINI_PREVIEW_H = 140;
+
+function MiniPreview({ project, frame }: { project: Project; frame: RunFrame | null }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const width = project.grid.width;
+  const height = project.grid.height;
+  const viewport = useMemo(() => fitToScreen(width, height, MINI_PREVIEW_W, MINI_PREVIEW_H), [width, height]);
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext('2d');
+    if (!canvas || !ctx) return;
+    ctx.clearRect(0, 0, MINI_PREVIEW_W, MINI_PREVIEW_H);
+    drawScene(ctx, project.baseline, width, height, viewport, {
+      showGrid: false,
+      layerVisible: { terrain: true, object: true, flow: false, zone: false, shade: false, locked: false, background: false },
+      selectedObjectId: null,
+    });
+    if (frame) {
+      drawVehicles(ctx, frame.vehiclePositions, viewport, null, frame.vehicleIds);
+      drawAgents(ctx, frame.positions, viewport, null, frame.agentIds);
+    }
+  }, [project, width, height, viewport, frame]);
+
+  return (
+    <canvas
+      ref={canvasRef}
+      width={MINI_PREVIEW_W}
+      height={MINI_PREVIEW_H}
+      className="w-full rounded-lg"
+      style={{ background: '#F5F3EC', aspectRatio: `${MINI_PREVIEW_W} / ${MINI_PREVIEW_H}` }}
+    />
   );
 }
 
