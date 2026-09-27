@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
 import { useAppStore } from '../app/store';
+import type { Project } from '../data/schema';
 import type { ProjectSummary } from '../data/projectLibrary';
 import { deleteProjectFromLibrary, duplicateProjectInLibrary, listProjectSummaries, loadProjectFromLibrary, renameProjectInLibrary } from '../data/projectLibrary';
-import { createSyntheticExampleProject } from '../data/sampleProject';
+import { DEMO_MARKETS } from '../data/demoProjects';
 
 function relativeTime(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
@@ -44,8 +45,8 @@ export function ProjectsScreen({ onOpen }: { onOpen: () => void }) {
     onOpen();
   }
 
-  function loadExample() {
-    setProject(createSyntheticExampleProject());
+  function openDemo(build: () => Project) {
+    setProject(build());
     onOpen();
   }
 
@@ -82,14 +83,6 @@ export function ProjectsScreen({ onOpen }: { onOpen: () => void }) {
           </div>
           <div className="flex gap-2">
             <button
-              onClick={loadExample}
-              className="rounded-lg px-3 py-2 text-sm font-medium transition"
-              style={{ border: '1px solid var(--color-border-strong)', color: 'var(--color-text)' }}
-              title="Start from a filled-in example market"
-            >
-              Try an example
-            </button>
-            <button
               onClick={createBlank}
               className="rounded-lg px-3 py-2 text-sm font-medium text-white transition"
               style={{ background: 'var(--color-accent)' }}
@@ -99,12 +92,42 @@ export function ProjectsScreen({ onOpen }: { onOpen: () => void }) {
           </div>
         </div>
 
+        <div className="mb-8">
+          <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--color-text-faint)' }}>
+            Demo markets
+          </h2>
+          <p className="mb-3 text-sm" style={{ color: 'var(--color-text-muted)' }}>
+            Three ready-made markets — open one straight into Simulate, Compare, or History to see how everything fits together.
+          </p>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            {DEMO_MARKETS.map((demo) => (
+              <button
+                key={demo.id}
+                onClick={() => openDemo(demo.build)}
+                className="rounded-2xl p-4 text-left transition hover:brightness-95"
+                style={{ background: 'var(--color-accent-soft)', border: '1px solid var(--color-border)' }}
+              >
+                <div className="text-sm font-semibold" style={{ color: 'var(--color-accent-hover)' }}>
+                  {demo.name}
+                </div>
+                <p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                  {demo.description}
+                </p>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--color-text-faint)' }}>
+          Your markets
+        </h2>
+
         {projects == null && <p className="text-sm" style={{ color: 'var(--color-text-faint)' }}>Loading…</p>}
 
         {projects != null && projects.length === 0 && (
           <div className="rounded-2xl border border-dashed px-6 py-16 text-center" style={{ borderColor: 'var(--color-border-strong)' }}>
             <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-              No markets yet. Start with a blank grid, or try the example to see how it works.
+              No markets yet. Start with a blank grid, or open one of the demo markets above to see how it works.
             </p>
           </div>
         )}

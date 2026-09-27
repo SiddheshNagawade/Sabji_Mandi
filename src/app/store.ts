@@ -2,11 +2,11 @@ import { create } from 'zustand';
 import type { CellChange, Dir4, EntranceType, Layout, LayoutObject, Phase, Project, ProduceCategory, VehicleType, XY } from '../data/schema';
 import { TileId } from '../data/schema';
 import { createBlankProject } from '../data/defaults';
-import { downloadProjectFile, readProjectFile } from '../data/io';
+import { downloadProjectFile, readProjectFile, serializeLayout } from '../data/io';
 import { saveProjectToLibrary, setCurrentProjectId } from '../data/projectLibrary';
 import { rebuildObjectLayer } from '../editor/objectLayer';
 import type { BlockDef } from '../editor/blocks';
-import { growLayout } from '../editor/growGrid';
+import { growLayout, shiftBackground } from '../editor/growGrid';
 import { fitToScreen, zoomAroundPoint } from '../editor/viewport';
 import type { Viewport } from '../viz/renderTiles';
 import {
@@ -83,6 +83,7 @@ interface AppState {
   viewport: Viewport;
   viewportSize: { width: number; height: number };
   hoverCell: XY | null;
+  propertiesWidth: number;
 
   setProject: (project: Project) => void;
   newProject: (name?: string, width?: number, height?: number) => void;
@@ -137,14 +138,23 @@ interface AppState {
   updatePhase: (id: number, updater: (phase: Phase) => Phase) => void;
   deletePhase: (id: number) => void;
 
-  /** Grows the grid to at least newWidth x newHeight, preserving all content. No-op if already that size or larger. */
-  growGrid: (newWidth: number, newHeight: number) => void;
+  /**
+   * Grows the grid by the given number of cells on each side, preserving all
+   * content and shifting object/background/viewport coordinates so nothing
+   * visually jumps. Returns the (dx, dy) shift applied — 0 unless growing
+   * left/up — which callers with their own cell-coordinate state (an
+   * in-progress drag, say) need to apply to that state too.
+   */
+  growGrid: (left: number, top: number, right: number, bottom: number) => { dx: number; dy: number };
 
   setViewport: (update: Viewport | ((v: Viewport) => Viewport)) => void;
   setViewportSize: (size: { width: number; height: number }) => void;
   zoomBy: (factor: number) => void;
   resetZoom: () => void;
   setHoverCell: (cell: XY | null) => void;
+  setPropertiesWidth: (width: number) => void;
+
+  addSnapshot: (note: string) => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -177,6 +187,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   viewport: { originX: 20, originY: 20, zoom: 32 },
   viewportSize: { width: 900, height: 700 },
   hoverCell: null,
+  propertiesWidth: 288,
 
   setProject: (project) => {
     set({ project, history: [], historyIndex: 0, layoutVersion: 0, selectedObjectId: null, activeScenarioId: 'baseline' });
@@ -431,19 +442,32 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ project: { ...project }, layoutVersion: get().layoutVersion + 1 });
   },
 
-  growGrid: (newWidth, newHeight) => {
-    const { project } = get();
+  growGrid: (left, top, right, bottom) => {
+    const dx = Math.max(0, Math.round(left));
+    const dy = Math.max(0, Math.round(top));
+    const growRight = Math.max(0, Math.round(right));
+    const growBottom = Math.max(0, Math.round(bottom));
+    if (dx === 0 && dy === 0 && growRight === 0 && growBottom === 0) return { dx: 0, dy: 0 };
+    const { project, viewport, hoverCell, focusCell } = get();
     const oldWidth = project.grid.width;
     const oldHeight = project.grid.height;
-    const width = Math.max(oldWidth, newWidth);
-    const height = Math.max(oldHeight, newHeight);
-    if (width === oldWidth && height === oldHeight) return;
-    const grown = growLayout(project.baseline, oldWidth, oldHeight, width, height);
+    const width = oldWidth + dx + growRight;
+    const height = oldHeight + dy + growBottom;
+    const grown = growLayout(project.baseline, oldWidth, oldHeight, width, height, dx, dy);
+    const background = shiftBackground(project.background, dx, dy);
     set({
-      project: { ...project, grid: { ...project.grid, width, height }, baseline: grown },
+      project: { ...project, grid: { ...project.grid, width, height }, baseline: grown, background },
       layoutVersion: get().layoutVersion + 1,
     });
+    if (dx > 0 || dy > 0) {
+      set({
+        viewport: { ...viewport, originX: viewport.originX - dx * viewport.zoom, originY: viewport.originY - dy * viewport.zoom },
+        hoverCell: hoverCell ? { x: hoverCell.x + dx, y: hoverCell.y + dy } : null,
+        focusCell: focusCell ? { x: focusCell.x + dx, y: focusCell.y + dy } : null,
+      });
+    }
     void get().autosave();
+    return { dx, dy };
   },
 
   setViewport: (update) => set((s) => ({ viewport: typeof update === 'function' ? (update as (v: Viewport) => Viewport)(s.viewport) : update })),
@@ -457,6 +481,20 @@ export const useAppStore = create<AppState>((set, get) => ({
     set({ viewport: fitToScreen(project.grid.width, project.grid.height, viewportSize.width, viewportSize.height) });
   },
   setHoverCell: (cell) => set({ hoverCell: cell }),
+  setPropertiesWidth: (width) => set({ propertiesWidth: Math.max(240, Math.min(560, width)) }),
+
+  addSnapshot: (note) => {
+    const { project } = get();
+    const snapshot = {
+      id: crypto.randomUUID(),
+      timestamp: new Date().toISOString(),
+      note,
+      layoutSerialized: JSON.stringify(serializeLayout(project.baseline)),
+      paramsSerialized: JSON.stringify(project.params),
+    };
+    set({ project: { ...project, snapshots: [...project.snapshots, snapshot] } });
+    void get().autosave();
+  },
 }));
 
 function nextEdge(edge: Dir4): Dir4 {

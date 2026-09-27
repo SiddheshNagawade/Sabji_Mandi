@@ -6,30 +6,46 @@ import { TILE_INFO } from '../data/schema';
 import { PRIMARY_BLOCKS } from './blocks';
 import { applyBrushSize, floodFillIndices, idx, inBounds, quantizeDirection, rasterLine, rasterRect } from './grid';
 import { objectAtCell } from './objectLayer';
-import { fitToScreen } from './viewport';
+import { fitToScreen, zoomAroundPoint } from './viewport';
 import type { LayerVisibility, Viewport } from '../viz/renderTiles';
 import { CANVAS_PAPER_COLOR, TERRAIN_ALPHA, cellToScreen, drawArrow, drawScene, screenToCell } from '../viz/renderTiles';
 
-// How close (in cells) to the current right/bottom edge triggers growth, and
-// how many cells to grow by each time — gives the user room to keep dragging
-// without hitting a hard wall (SPEC-driven UX: "the sheet gets larger as I draw").
+// How close (in cells) to the current edge triggers growth, and how many
+// cells to grow by each time — gives the user room to keep dragging without
+// hitting a hard wall, in any direction (the sheet grows as you draw, the
+// way it would starting from the middle of an unbounded surface).
 const GROW_MARGIN = 6;
 const GROW_CHUNK = 16;
 
-function ensureCapacityFor(cell: XY): { width: number; height: number } {
+/**
+ * Grows the grid if `cell` is near/past any edge. Returns the new size and
+ * the (dx, dy) shift applied (nonzero only when growing left/up) — callers
+ * must add this shift to `cell` itself and to any other cell-coordinate
+ * state (an in-progress drag) before using it.
+ */
+function ensureCapacityFor(cell: XY): { width: number; height: number; dx: number; dy: number } {
   const s = useAppStore.getState();
   const w = s.project.grid.width;
   const h = s.project.grid.height;
-  let newWidth = w;
-  let newHeight = h;
-  if (cell.x >= w - GROW_MARGIN) newWidth = cell.x + GROW_CHUNK;
-  if (cell.y >= h - GROW_MARGIN) newHeight = cell.y + GROW_CHUNK;
-  if (newWidth > w || newHeight > h) {
-    s.growGrid(newWidth, newHeight);
-    const s2 = useAppStore.getState();
-    return { width: s2.project.grid.width, height: s2.project.grid.height };
+  const left = cell.x < GROW_MARGIN ? GROW_CHUNK - cell.x : 0;
+  const top = cell.y < GROW_MARGIN ? GROW_CHUNK - cell.y : 0;
+  const right = cell.x >= w - GROW_MARGIN ? cell.x + GROW_CHUNK - w + 1 : 0;
+  const bottom = cell.y >= h - GROW_MARGIN ? cell.y + GROW_CHUNK - h + 1 : 0;
+  if (left <= 0 && top <= 0 && right <= 0 && bottom <= 0) return { width: w, height: h, dx: 0, dy: 0 };
+  const { dx, dy } = s.growGrid(left, top, right, bottom);
+  const s2 = useAppStore.getState();
+  return { width: s2.project.grid.width, height: s2.project.grid.height, dx, dy };
+}
+
+function shiftXYMap<T extends XY>(map: Map<string, T>, dx: number, dy: number) {
+  if (dx === 0 && dy === 0) return;
+  const entries = Array.from(map.values());
+  map.clear();
+  for (const v of entries) {
+    const nx = v.x + dx;
+    const ny = v.y + dy;
+    map.set(`${nx},${ny}`, { ...v, x: nx, y: ny });
   }
-  return { width: w, height: h };
 }
 
 export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
@@ -79,6 +95,8 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
   const moveBackgroundBy = useAppStore((s) => s.moveBackgroundBy);
   const viewport = useAppStore((s) => s.viewport);
   const setViewport = useAppStore((s) => s.setViewport);
+  const zoomBy = useAppStore((s) => s.zoomBy);
+  const resetZoom = useAppStore((s) => s.resetZoom);
   const setViewportSize = useAppStore((s) => s.setViewportSize);
   const hoverCell = useAppStore((s) => s.hoverCell);
   const setHoverCell = useAppStore((s) => s.setHoverCell);
@@ -290,7 +308,7 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
     (e: ReactPointerEvent<HTMLCanvasElement>) => {
       e.preventDefault();
       (e.target as Element).setPointerCapture(e.pointerId);
-      const cell = getCellFromEvent(e);
+      const rawCell = getCellFromEvent(e);
 
       if (panRef.current.active || spaceHeldRef.current || e.button === 1) {
         panRef.current = { active: true, lastScreen: { x: e.clientX, y: e.clientY } };
@@ -298,8 +316,8 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
       }
 
       if (bgMode === 'calibrate') {
-        if (!inBounds(cell.x, cell.y, width, height)) return;
-        addCalibrationClick(cell);
+        if (!inBounds(rawCell.x, rawCell.y, width, height)) return;
+        addCalibrationClick(rawCell);
         if (calibrationClicks.length === 1) setCalibPromptOpen(true);
         return;
       }
@@ -309,9 +327,10 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
       }
 
       const effectiveTool = e.button === 2 ? 'eraser' : tool;
-      // Placing/painting near the current right/bottom edge grows the grid first,
-      // so a drag never hits a hard wall mid-stroke.
-      const bounds = effectiveTool === 'select' ? { width, height } : ensureCapacityFor(cell);
+      // Placing/painting near any edge grows the grid first, so a drag never
+      // hits a hard wall mid-stroke, in any direction.
+      const bounds = effectiveTool === 'select' ? { width, height, dx: 0, dy: 0 } : ensureCapacityFor(rawCell);
+      const cell = { x: rawCell.x + bounds.dx, y: rawCell.y + bounds.dy };
       if (!inBounds(cell.x, cell.y, bounds.width, bounds.height)) return;
 
       dragRef.current = { active: true, button: e.button, shift: e.shiftKey, alt: e.altKey, start: cell, last: cell };
@@ -378,8 +397,8 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
 
   const onPointerMove = useCallback(
     (e: ReactPointerEvent<HTMLCanvasElement>) => {
-      const cell = getCellFromEvent(e);
-      setHoverCell(inBounds(cell.x, cell.y, width, height) ? cell : null);
+      const rawCell = getCellFromEvent(e);
+      setHoverCell(inBounds(rawCell.x, rawCell.y, width, height) ? rawCell : null);
 
       if (panRef.current.active) {
         const dx = e.clientX - panRef.current.lastScreen.x;
@@ -394,7 +413,15 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
       }
       if (!dragRef.current.active) return;
       const effectiveTool = dragRef.current.button === 2 ? 'eraser' : tool;
-      const bounds = effectiveTool === 'select' ? { width, height } : ensureCapacityFor(cell);
+      const bounds = effectiveTool === 'select' ? { width, height, dx: 0, dy: 0 } : ensureCapacityFor(rawCell);
+      if (bounds.dx !== 0 || bounds.dy !== 0) {
+        dragRef.current.start = { x: dragRef.current.start.x + bounds.dx, y: dragRef.current.start.y + bounds.dy };
+        dragRef.current.last = { x: dragRef.current.last.x + bounds.dx, y: dragRef.current.last.y + bounds.dy };
+        shiftXYMap(paintMapRef.current, bounds.dx, bounds.dy);
+        shiftXYMap(arrowMapRef.current, bounds.dx, bounds.dy);
+        setHoverCell({ x: rawCell.x + bounds.dx, y: rawCell.y + bounds.dy });
+      }
+      const cell = { x: rawCell.x + bounds.dx, y: rawCell.y + bounds.dy };
       if (!inBounds(cell.x, cell.y, bounds.width, bounds.height)) return;
       const prevLast = dragRef.current.last;
       dragRef.current.last = cell;
@@ -570,6 +597,21 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
       }
       if (e.key === '[') setBrushSize(Math.max(1, brushSize - 1));
       if (e.key === ']') setBrushSize(Math.min(5, brushSize + 1));
+      if ((e.ctrlKey || e.metaKey) && (e.key === '=' || e.key === '+')) {
+        e.preventDefault();
+        zoomBy(1.2);
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === '-') {
+        e.preventDefault();
+        zoomBy(1 / 1.2);
+        return;
+      }
+      if ((e.ctrlKey || e.metaKey) && e.key === '0') {
+        e.preventDefault();
+        resetZoom();
+        return;
+      }
       if (e.key === '0') setViewport(fitToScreenEl(width, height, containerRef.current));
       if (e.key.toLowerCase() === 'v') {
         setActiveBlock(PRIMARY_BLOCKS[0]);
@@ -587,7 +629,7 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
       window.removeEventListener('keydown', onKeyDown);
       window.removeEventListener('keyup', onKeyUp);
     };
-  }, [tool, brushSize, selectedObjectId, width, height, deleteSelectedObject, flipStallFrontEdge, rotateArrowDir, rotateStallFootprint, setActiveBlock, setBrushSize, toggleGrid]);
+  }, [tool, brushSize, selectedObjectId, width, height, deleteSelectedObject, flipStallFrontEdge, rotateArrowDir, rotateStallFootprint, setActiveBlock, setBrushSize, toggleGrid, zoomBy, resetZoom, setViewport]);
 
   // Fit to screen once on mount.
   useEffect(() => {
@@ -607,26 +649,29 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
     setFocusCell(null);
   }, [focusCell, setFocusCell]);
 
-  // Native (non-passive) wheel listener so preventDefault actually stops page scroll/zoom.
+  // Native (non-passive) wheel listener so preventDefault actually stops page
+  // scroll/zoom. Follows the standard trackpad convention (Figma/Miro/etc.):
+  // a two-finger scroll pans, and pinching — which browsers report as a wheel
+  // event with ctrlKey set — zooms around the cursor. Mouse users get the
+  // same behaviour: plain wheel pans, Ctrl/Cmd+wheel zooms.
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
     function onWheel(e: WheelEvent) {
       e.preventDefault();
-      const rect = canvas!.getBoundingClientRect();
-      const sx = e.clientX - rect.left;
-      const sy = e.clientY - rect.top;
-      setViewport((v) => {
-        const factor = e.deltaY < 0 ? 1.15 : 1 / 1.15;
-        const newZoom = Math.max(2, Math.min(48, v.zoom * factor));
-        const cellX = (sx - v.originX) / v.zoom;
-        const cellY = (sy - v.originY) / v.zoom;
-        return { zoom: newZoom, originX: sx - cellX * newZoom, originY: sy - cellY * newZoom };
-      });
+      if (e.ctrlKey || e.metaKey) {
+        const rect = canvas!.getBoundingClientRect();
+        const sx = e.clientX - rect.left;
+        const sy = e.clientY - rect.top;
+        const factor = Math.exp(-e.deltaY * 0.002);
+        setViewport((v) => zoomAroundPoint(v, factor, sx, sy));
+      } else {
+        setViewport((v) => ({ ...v, originX: v.originX - e.deltaX, originY: v.originY - e.deltaY }));
+      }
     }
     canvas.addEventListener('wheel', onWheel, { passive: false });
     return () => canvas.removeEventListener('wheel', onWheel);
-  }, []);
+  }, [setViewport]);
 
   const calibDialog = calibPromptOpen && (
     <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/30">

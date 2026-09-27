@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import type { PointerEvent as ReactPointerEvent, ReactNode } from 'react';
+import { useCallback, useRef } from 'react';
 import { useAppStore } from '../../app/store';
 import { MIN_ZOOM, MAX_ZOOM } from '../viewport';
 import { PropertiesPanel } from './PropertiesPanel';
@@ -7,7 +8,8 @@ import { LinterPanel } from './LinterPanel';
 // A single persistent, sectioned panel for canvas-level settings — grid,
 // zoom, issues — plus the selected object's properties when there is one.
 // Kept separate from the left tool rail: this is "about the canvas", not
-// "about the currently selected tool".
+// "about the currently selected tool". Its width is user-adjustable (drag
+// the left edge) since long labels can otherwise feel cramped.
 export function PropertiesDock() {
   const selectedObjectId = useAppStore((s) => s.selectedObjectId);
   const setSelectedObjectId = useAppStore((s) => s.setSelectedObjectId);
@@ -20,9 +22,39 @@ export function PropertiesDock() {
   const zoomBy = useAppStore((s) => s.zoomBy);
   const resetZoom = useAppStore((s) => s.resetZoom);
   const setViewport = useAppStore((s) => s.setViewport);
+  const propertiesWidth = useAppStore((s) => s.propertiesWidth);
+  const setPropertiesWidth = useAppStore((s) => s.setPropertiesWidth);
+
+  const dragStartRef = useRef<{ x: number; width: number } | null>(null);
+
+  const onHandlePointerDown = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      e.preventDefault();
+      (e.target as Element).setPointerCapture(e.pointerId);
+      dragStartRef.current = { x: e.clientX, width: propertiesWidth };
+    },
+    [propertiesWidth],
+  );
+  const onHandlePointerMove = useCallback(
+    (e: ReactPointerEvent<HTMLDivElement>) => {
+      if (!dragStartRef.current) return;
+      setPropertiesWidth(dragStartRef.current.width - (e.clientX - dragStartRef.current.x));
+    },
+    [setPropertiesWidth],
+  );
+  const onHandlePointerUp = useCallback(() => {
+    dragStartRef.current = null;
+  }, []);
 
   return (
-    <div className="flex h-full w-72 shrink-0 flex-col overflow-y-auto border-l" style={{ borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
+    <div className="relative flex h-full shrink-0 flex-col overflow-y-auto border-l" style={{ width: propertiesWidth, borderColor: 'var(--color-border)', background: 'var(--color-surface)' }}>
+      <div
+        onPointerDown={onHandlePointerDown}
+        onPointerMove={onHandlePointerMove}
+        onPointerUp={onHandlePointerUp}
+        className="absolute -left-1 top-0 z-10 h-full w-2 cursor-col-resize"
+        title="Drag to resize"
+      />
       {selectedObjectId != null && (
         <Section title="Selection" action={<button onClick={() => setSelectedObjectId(null)} className="text-[11px] text-neutral-400 hover:text-neutral-700">Deselect</button>}>
           <PropertiesPanel />

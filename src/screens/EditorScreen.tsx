@@ -4,6 +4,7 @@ import { ToolRail } from '../editor/panels/ToolRail';
 import { PropertiesDock } from '../editor/panels/PropertiesDock';
 import { RulesDrawer } from '../editor/panels/RulesDrawer';
 import { StatusBar } from '../editor/panels/StatusBar';
+import { SnapshotButton } from '../editor/panels/SnapshotButton';
 import { useLintCellSet } from '../editor/panels/LinterPanel';
 
 export function EditorScreen() {
@@ -23,6 +24,9 @@ export function EditorScreen() {
             Synthetic example — not the real mandi
           </span>
         )}
+        <div className="ml-auto">
+          <SnapshotButton />
+        </div>
       </div>
       <div className="flex min-h-0 flex-1">
         <div className="relative min-w-0 flex-1 overflow-hidden">

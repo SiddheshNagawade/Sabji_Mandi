@@ -30,7 +30,7 @@ interface SerializedLayout extends Omit<Layout, 'terrain' | 'object' | 'flow' | 
   locked: string;
 }
 
-function serializeLayout(layout: Layout): SerializedLayout {
+export function serializeLayout(layout: Layout): SerializedLayout {
   return {
     ...layout,
     terrain: bytesToBase64(layout.terrain),
