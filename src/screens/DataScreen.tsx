@@ -3,6 +3,7 @@ import { useAppStore } from '../app/store';
 import { countProvenance } from '../data/provenance';
 import { computeLayoutStats } from '../data/layoutStats';
 import { generateSuggestions } from '../data/suggestions';
+import { downloadMarketReport } from '../data/reportImage';
 import { PRODUCE_COLORS } from '../data/schema';
 import { computeLintWarnings } from '../editor/layoutLinter';
 import { produceLabel } from '../editor/labels';
@@ -28,13 +29,23 @@ export function DataScreen() {
   return (
     <div className="h-full overflow-y-auto" style={{ background: 'var(--color-bg)' }}>
       <div className="mx-auto max-w-4xl space-y-5 px-6 py-8">
-        <div>
-          <h1 className="text-xl font-semibold" style={{ color: 'var(--color-text)' }}>
-            {project.meta.name} — data &amp; insights
-          </h1>
-          <p className="mt-1 text-sm" style={{ color: 'var(--color-text-muted)' }}>
-            What this layout is actually made of, and what the demand model assumes — computed straight from your drawing, no simulation required.
-          </p>
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h1 className="text-xl font-semibold" style={{ color: 'var(--color-text)' }}>
+              {project.meta.name} — data &amp; insights
+            </h1>
+            <p className="mt-1 text-sm" style={{ color: 'var(--color-text-muted)' }}>
+              What this layout is actually made of, and what the demand model assumes — computed straight from your drawing, no simulation required.
+            </p>
+          </div>
+          <button
+            onClick={() => downloadMarketReport(project)}
+            className="shrink-0 rounded-lg px-3 py-2 text-sm font-medium transition hover:brightness-95"
+            style={{ background: 'var(--color-bg)', color: 'var(--color-text)', border: '1px solid var(--color-border-strong)' }}
+            title="Download a one-page PNG summary of this market"
+          >
+            ⬇ Export report
+          </button>
         </div>
 
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-4">
