@@ -1,5 +1,5 @@
 import type { CSSProperties, ReactNode } from 'react';
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useAppStore } from '../../app/store';
 import type { EntranceType, VehicleType } from '../../data/schema';
 import { PRODUCE_COLORS, type ProduceCategory } from '../../data/schema';
@@ -67,20 +67,32 @@ export function ToolRail() {
   const height = useAppStore((s) => s.project.grid.height);
   const layoutVersion = useAppStore((s) => s.layoutVersion);
 
-  const [showMore, setShowMore] = useState(false);
-  const [blockFlyoutClosed, setBlockFlyoutClosed] = useState(false);
-  const [openPanel, setOpenPanel] = useState<'layers' | null>(null);
+  // Which single slot's flyout is showing, keyed by block id / 'more' / 'layers'.
+  // Hovering a slot (or its flyout) opens it; leaving both closes it after a
+  // short grace period, so a flyout no longer needs an explicit X click to
+  // dismiss — it behaves like a normal hover menu, not a modal.
+  const [openSlotId, setOpenSlotId] = useState<string | null>(null);
+  const closeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => { if (closeTimerRef.current) clearTimeout(closeTimerRef.current); }, []);
 
-  // Re-open the block flyout fresh whenever the selection changes.
-  useEffect(() => setBlockFlyoutClosed(false), [activeBlockId]);
+  function openSlot(id: string) {
+    if (closeTimerRef.current) {
+      clearTimeout(closeTimerRef.current);
+      closeTimerRef.current = null;
+    }
+    setOpenSlotId(id);
+  }
+  function scheduleCloseSlot() {
+    if (closeTimerRef.current) clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = setTimeout(() => setOpenSlotId(null), 200);
+  }
 
   const warnings = useMemo(() => computeLintWarnings(layout, width, height), [layout, width, height, layoutVersion]);
   const errorCount = warnings.filter((w) => w.severity === 'error').length;
 
   function selectBlock(b: BlockDef) {
     setActiveBlock(b);
-    setOpenPanel(null);
-    setShowMore(false);
+    setOpenSlotId(b.hasOptions ? b.id : null);
   }
 
   return (
@@ -92,49 +104,69 @@ export function ToolRail() {
           active={b.id === activeBlockId}
           style={b.id === activeBlockId ? activeSlotStyle(b.color) : idleStyleFor(b.color)}
           onClick={() => selectBlock(b)}
+          onMouseEnter={() => openSlot(b.id)}
+          onMouseLeave={scheduleCloseSlot}
+          flyout={
+            b.id === activeBlockId && b.hasOptions && openSlotId === b.id ? (
+              <Flyout title={b.label} onClose={() => setOpenSlotId(null)}>
+                <BlockOptions block={b} />
+              </Flyout>
+            ) : null
+          }
         >
           <BlockGlyph block={b} />
-          {b.id === activeBlockId && b.hasOptions && !blockFlyoutClosed && (
-            <Flyout title={b.label} onClose={() => setBlockFlyoutClosed(true)}>
-              <BlockOptions block={b} />
-            </Flyout>
-          )}
         </RailSlot>
       ))}
 
       <Divider />
 
-      <RailSlot title="More materials" active={showMore} onClick={() => setShowMore((v) => !v)}>
+      <RailSlot
+        title="More materials"
+        active={openSlotId === 'more'}
+        onClick={() => setOpenSlotId((v) => (v === 'more' ? null : 'more'))}
+        onMouseEnter={() => openSlot('more')}
+        onMouseLeave={scheduleCloseSlot}
+        flyout={
+          openSlotId === 'more' ? (
+            <Flyout title="More materials" onClose={() => setOpenSlotId(null)}>
+              <div className="grid grid-cols-3 gap-1.5">
+                {SECONDARY_BLOCKS.map((b) => (
+                  <button
+                    key={b.id}
+                    title={b.label}
+                    onClick={() => selectBlock(b)}
+                    className="flex h-11 w-11 flex-col items-center justify-center gap-0.5 rounded-xl text-[8px] font-medium transition"
+                    style={b.id === activeBlockId ? activeSlotStyle(b.color) : idleStyleFor(b.color)}
+                  >
+                    <BlockIcon id={b.id} className="h-3.5 w-3.5" />
+                    <span className="max-w-[38px] truncate">{b.label.split(' ')[0]}</span>
+                  </button>
+                ))}
+              </div>
+            </Flyout>
+          ) : null
+        }
+      >
         <span className="text-base leading-none">···</span>
-        {showMore && (
-          <Flyout title="More materials" onClose={() => setShowMore(false)}>
-            <div className="grid grid-cols-3 gap-1.5">
-              {SECONDARY_BLOCKS.map((b) => (
-                <button
-                  key={b.id}
-                  title={b.label}
-                  onClick={() => selectBlock(b)}
-                  className="flex h-11 w-11 flex-col items-center justify-center gap-0.5 rounded-xl text-[8px] font-medium transition"
-                  style={b.id === activeBlockId ? activeSlotStyle(b.color) : idleStyleFor(b.color)}
-                >
-                  <BlockIcon id={b.id} className="h-3.5 w-3.5" />
-                  <span className="max-w-[38px] truncate">{b.label.split(' ')[0]}</span>
-                </button>
-              ))}
-            </div>
-          </Flyout>
-        )}
       </RailSlot>
 
       <Divider />
 
-      <RailSlot title="Layers & backdrop" active={openPanel === 'layers'} onClick={() => setOpenPanel((p) => (p === 'layers' ? null : 'layers'))}>
+      <RailSlot
+        title="Layers & backdrop"
+        active={openSlotId === 'layers'}
+        onClick={() => setOpenSlotId((v) => (v === 'layers' ? null : 'layers'))}
+        onMouseEnter={() => openSlot('layers')}
+        onMouseLeave={scheduleCloseSlot}
+        flyout={
+          openSlotId === 'layers' ? (
+            <Flyout title="Layers & backdrop" onClose={() => setOpenSlotId(null)} width={224}>
+              <LayersPanel />
+            </Flyout>
+          ) : null
+        }
+      >
         <span>☰</span>
-        {openPanel === 'layers' && (
-          <Flyout title="Layers & backdrop" onClose={() => setOpenPanel(null)} width={224}>
-            <LayersPanel />
-          </Flyout>
-        )}
       </RailSlot>
 
       {errorCount > 0 && (
@@ -154,9 +186,27 @@ function Divider() {
   return <div className="mx-auto my-0.5 h-px w-8" style={{ background: 'var(--color-border)' }} />;
 }
 
-function RailSlot({ title, active, onClick, children, style }: { title: string; active: boolean; onClick: () => void; children: ReactNode; style?: CSSProperties }) {
+function RailSlot({
+  title,
+  active,
+  onClick,
+  children,
+  style,
+  flyout,
+  onMouseEnter,
+  onMouseLeave,
+}: {
+  title: string;
+  active: boolean;
+  onClick: () => void;
+  children: ReactNode;
+  style?: CSSProperties;
+  flyout?: ReactNode;
+  onMouseEnter?: () => void;
+  onMouseLeave?: () => void;
+}) {
   return (
-    <div className="relative">
+    <div className="relative" onMouseEnter={onMouseEnter} onMouseLeave={onMouseLeave}>
       <button
         title={title}
         onClick={onClick}
@@ -165,6 +215,7 @@ function RailSlot({ title, active, onClick, children, style }: { title: string; 
       >
         {children}
       </button>
+      {flyout}
     </div>
   );
 }
