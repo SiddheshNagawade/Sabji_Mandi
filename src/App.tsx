@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from './app/store';
 import { getCurrentProjectId, loadProjectFromLibrary } from './data/projectLibrary';
 import { ProjectsScreen, EditorScreen, SimulateScreen, CompareScreen, DataScreen, HistoryScreen, PitchScreen } from './screens';
+import { CommandPalette } from './app/CommandPalette';
 
 const TABS = [
   { id: 'projects', label: 'Projects' },
@@ -16,6 +17,7 @@ type TabId = (typeof TABS)[number]['id'] | 'pitch';
 
 export default function App() {
   const [tab, setTab] = useState<TabId>('projects');
+  const [paletteOpen, setPaletteOpen] = useState(false);
   const project = useAppStore((s) => s.project);
   const undo = useAppStore((s) => s.undo);
   const redo = useAppStore((s) => s.redo);
@@ -50,6 +52,11 @@ export default function App() {
     function onKey(e: KeyboardEvent) {
       const mod = e.ctrlKey || e.metaKey;
       if (!mod) return;
+      if (e.key === 'k') {
+        e.preventDefault();
+        setPaletteOpen((v) => !v);
+        return;
+      }
       if (e.key === 'z' && !e.shiftKey) {
         e.preventDefault();
         undo();
@@ -118,6 +125,18 @@ export default function App() {
           <IconButton title="Load from a file" onClick={() => fileInputRef.current?.click()}>
             📂
           </IconButton>
+          <div className="mx-1 h-5 w-px" style={{ background: 'var(--color-border)' }} />
+          <button
+            title="Search markets and screens (⌘K)"
+            onClick={() => setPaletteOpen(true)}
+            className="flex items-center gap-1.5 rounded-lg px-2 py-1 text-[12px] transition hover:bg-[var(--color-bg)]"
+            style={{ color: 'var(--color-text-muted)' }}
+          >
+            <span>🔍</span>
+            <span className="hidden rounded border px-1 text-[10px] sm:inline" style={{ borderColor: 'var(--color-border-strong)' }}>
+              ⌘K
+            </span>
+          </button>
           <input
             ref={fileInputRef}
             type="file"
@@ -139,6 +158,7 @@ export default function App() {
         {tab === 'data' && <DataScreen />}
         {tab === 'history' && <HistoryScreen />}
       </main>
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} tabs={TABS} onNavigate={(id) => setTab(id as TabId)} />
     </div>
   );
 }
