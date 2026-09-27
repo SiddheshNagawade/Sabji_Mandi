@@ -5,6 +5,7 @@ import type { EntranceType, VehicleType } from '../../data/schema';
 import { PRODUCE_COLORS, type ProduceCategory } from '../../data/schema';
 import type { BlockDef } from '../blocks';
 import { PRIMARY_BLOCKS, SECONDARY_BLOCKS } from '../blocks';
+import { BlockIcon } from '../blockIcons';
 import { computeLintWarnings } from '../layoutLinter';
 import { LayersPanel } from './LayersPanel';
 
@@ -116,7 +117,7 @@ export function ToolRail() {
                   className="flex h-11 w-11 flex-col items-center justify-center gap-0.5 rounded-xl text-[8px] font-medium transition"
                   style={b.id === activeBlockId ? activeSlotStyle(b.color) : idleStyleFor(b.color)}
                 >
-                  <span className="h-3 w-3 rounded-[3px]" style={{ background: b.color }} />
+                  <BlockIcon id={b.id} className="h-3.5 w-3.5" />
                   <span className="max-w-[38px] truncate">{b.label.split(' ')[0]}</span>
                 </button>
               ))}
@@ -169,10 +170,7 @@ function RailSlot({ title, active, onClick, children, style }: { title: string; 
 }
 
 function BlockGlyph({ block }: { block: BlockDef }) {
-  if (block.category === 'select') {
-    return <span className="flex h-4 w-4 items-center justify-center rounded-sm border-2 border-current" />;
-  }
-  return <span className="h-4 w-4 rounded-[4px]" style={{ background: block.color }} />;
+  return <BlockIcon id={block.id} />;
 }
 
 function Flyout({ title, onClose, children, width = 260 }: { title: string; onClose: () => void; children: ReactNode; width?: number }) {
