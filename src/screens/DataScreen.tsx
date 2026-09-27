@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import { useAppStore } from '../app/store';
 import { countProvenance } from '../data/provenance';
 import { computeLayoutStats } from '../data/layoutStats';
+import { generateSuggestions } from '../data/suggestions';
 import { PRODUCE_COLORS } from '../data/schema';
 import { computeLintWarnings } from '../editor/layoutLinter';
 import { produceLabel } from '../editor/labels';
@@ -22,6 +23,7 @@ export function DataScreen() {
   const topProduce = (Object.entries(stats.produceCounts) as [string, number][]).filter(([, n]) => n > 0).sort((a, b) => b[1] - a[1]);
 
   const insights = buildInsights(stats, provenance, totalParams, errors);
+  const suggestions = generateSuggestions(project);
 
   return (
     <div className="h-full overflow-y-auto" style={{ background: 'var(--color-bg)' }}>
@@ -121,6 +123,22 @@ export function DataScreen() {
             </ul>
           )}
         </Section>
+
+        {suggestions.length > 0 && (
+          <Section title="Why might this be congested?">
+            <ul className="space-y-2 text-sm">
+              {suggestions.map((s) => (
+                <li key={s.id} className="flex gap-2">
+                  <span
+                    className="mt-1.5 h-1.5 w-1.5 shrink-0 rounded-full"
+                    style={{ background: s.severity === 'high' ? 'var(--color-danger)' : 'var(--color-accent)' }}
+                  />
+                  <span style={{ color: 'var(--color-text)' }}>{s.message}</span>
+                </li>
+              ))}
+            </ul>
+          </Section>
+        )}
 
         <Section title="Insights">
           <ul className="list-disc space-y-1.5 pl-4 text-sm" style={{ color: 'var(--color-text)' }}>
