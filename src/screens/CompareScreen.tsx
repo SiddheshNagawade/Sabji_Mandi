@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import type { Project, ProvenanceTag } from '../data/schema';
 import type { ProjectSummary } from '../data/projectLibrary';
 import { listProjectSummaries, loadProjectFromLibrary } from '../data/projectLibrary';
@@ -6,34 +6,16 @@ import { countProvenance } from '../data/provenance';
 import type { LayoutStats } from '../data/layoutStats';
 import { computeLayoutStats } from '../data/layoutStats';
 import { computeLintWarnings } from '../editor/layoutLinter';
-import { fitToScreen } from '../editor/viewport';
-import { drawScene } from '../viz/renderTiles';
-import { drawAgents, drawVehicles } from '../viz/renderAgents';
+import type { RunFrame } from '../viz/MiniLayoutPreview';
+import { MiniLayoutPreview } from '../viz/MiniLayoutPreview';
+import { LiveDualSimulate } from './compare/LiveDualSimulate';
 import type { WorkerMessage } from '../sim/worker/protocol';
+import { throttled } from './compare/throttled';
 
 interface RunProgress {
   t: number;
   spawned: number;
   peopleInMarket: number;
-}
-
-interface RunFrame {
-  positions: Float32Array;
-  agentIds: Int32Array;
-  vehiclePositions: Float32Array;
-  vehicleIds: Int32Array;
-}
-
-/** Drops calls closer together than `ms`, so a fast stream of worker messages doesn't flood React with renders. */
-function throttled<T extends (...args: never[]) => void>(fn: T, ms: number): T {
-  let last = 0;
-  return ((...args: Parameters<T>) => {
-    const now = performance.now();
-    if (now - last >= ms) {
-      last = now;
-      fn(...args);
-    }
-  }) as T;
 }
 
 interface RunResult {
@@ -137,6 +119,7 @@ export function CompareScreen() {
   const [progressB, setProgressB] = useState<RunProgress | null>(null);
   const [frameA, setFrameA] = useState<RunFrame | null>(null);
   const [frameB, setFrameB] = useState<RunFrame | null>(null);
+  const [liveOpen, setLiveOpen] = useState(false);
 
   useEffect(() => {
     void listProjectSummaries().then((list) => {
@@ -151,6 +134,7 @@ export function CompareScreen() {
     setResultB(null);
     setProgressA(null);
     setFrameA(null);
+    setLiveOpen(false);
     if (idA) void loadProjectFromLibrary(idA).then((p) => setProjectA(p ?? null));
     else setProjectA(null);
   }, [idA]);
@@ -160,6 +144,7 @@ export function CompareScreen() {
     setResultB(null);
     setProgressB(null);
     setFrameB(null);
+    setLiveOpen(false);
     if (idB) void loadProjectFromLibrary(idB).then((p) => setProjectB(p ?? null));
     else setProjectB(null);
   }, [idB]);
@@ -247,31 +232,47 @@ export function CompareScreen() {
               </div>
             )}
 
-            <div className="rounded-2xl p-4" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
-              {canRun ? (
-                <button
-                  onClick={() => void runBoth()}
-                  disabled={running}
-                  className="rounded-lg px-4 py-2 text-sm font-medium text-white transition disabled:opacity-60"
-                  style={{ background: 'var(--color-accent)' }}
-                >
-                  {running ? 'Simulating both…' : 'Run both and compare results'}
-                </button>
-              ) : (
-                <p className="text-xs" style={{ color: 'var(--color-danger)' }}>
-                  Fix layout problems before running a comparison: {issuesA.length > 0 && `${summaryA.name} — ${issuesA[0].message}`}
-                  {issuesA.length > 0 && issuesB.length > 0 && ' · '}
-                  {issuesB.length > 0 && `${summaryB.name} — ${issuesB[0].message}`}
-                </p>
-              )}
-              {running && (
-                <div className="mt-3 grid grid-cols-2 gap-4">
-                  <RunProgressCard name={summaryA.name} project={projectA} progress={progressA} frame={frameA} />
-                  <RunProgressCard name={summaryB.name} project={projectB} progress={progressB} frame={frameB} />
-                </div>
-              )}
-              {!running && (resultA || resultB) && <ResultTable a={resultA} b={resultB} nameA={summaryA.name} nameB={summaryB.name} />}
-            </div>
+            {!liveOpen && (
+              <div className="rounded-2xl p-4" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                {canRun ? (
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => void runBoth()}
+                      disabled={running}
+                      className="rounded-lg px-4 py-2 text-sm font-medium text-white transition disabled:opacity-60"
+                      style={{ background: 'var(--color-accent)' }}
+                    >
+                      {running ? 'Simulating both…' : 'Run both and compare results'}
+                    </button>
+                    <button
+                      onClick={() => setLiveOpen(true)}
+                      disabled={running}
+                      className="rounded-lg px-4 py-2 text-sm font-medium transition disabled:opacity-60"
+                      style={{ background: 'var(--color-bg)', color: 'var(--color-text)' }}
+                    >
+                      ▶ Watch live
+                    </button>
+                  </div>
+                ) : (
+                  <p className="text-xs" style={{ color: 'var(--color-danger)' }}>
+                    Fix layout problems before running a comparison: {issuesA.length > 0 && `${summaryA.name} — ${issuesA[0].message}`}
+                    {issuesA.length > 0 && issuesB.length > 0 && ' · '}
+                    {issuesB.length > 0 && `${summaryB.name} — ${issuesB[0].message}`}
+                  </p>
+                )}
+                {running && (
+                  <div className="mt-3 grid grid-cols-2 gap-4">
+                    <RunProgressCard name={summaryA.name} project={projectA} progress={progressA} frame={frameA} />
+                    <RunProgressCard name={summaryB.name} project={projectB} progress={progressB} frame={frameB} />
+                  </div>
+                )}
+                {!running && (resultA || resultB) && <ResultTable a={resultA} b={resultB} nameA={summaryA.name} nameB={summaryB.name} />}
+              </div>
+            )}
+
+            {liveOpen && projectA && projectB && (
+              <LiveDualSimulate projectA={projectA} projectB={projectB} nameA={summaryA.name} nameB={summaryB.name} onClose={() => setLiveOpen(false)} />
+            )}
           </>
         )}
       </div>
@@ -392,47 +393,11 @@ function RunProgressCard({ name, project, progress, frame }: { name: string; pro
       <div className="mb-2 h-1.5 overflow-hidden rounded-full" style={{ background: 'var(--color-border)' }}>
         <div className="h-full rounded-full transition-[width]" style={{ width: `${pct}%`, background: 'var(--color-accent)' }} />
       </div>
-      {project && <MiniPreview project={project} frame={frame} />}
+      {project && <MiniLayoutPreview project={project} frame={frame} />}
       <p className="mt-1.5 text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
         {progress ? `${progress.peopleInMarket} in market now · ${progress.spawned} arrived so far` : 'Warming up the simulation…'}
       </p>
     </div>
-  );
-}
-
-const MINI_PREVIEW_W = 240;
-const MINI_PREVIEW_H = 140;
-
-function MiniPreview({ project, frame }: { project: Project; frame: RunFrame | null }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  const width = project.grid.width;
-  const height = project.grid.height;
-  const viewport = useMemo(() => fitToScreen(width, height, MINI_PREVIEW_W, MINI_PREVIEW_H), [width, height]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    const ctx = canvas?.getContext('2d');
-    if (!canvas || !ctx) return;
-    ctx.clearRect(0, 0, MINI_PREVIEW_W, MINI_PREVIEW_H);
-    drawScene(ctx, project.baseline, width, height, viewport, {
-      showGrid: false,
-      layerVisible: { terrain: true, object: true, flow: false, zone: false, shade: false, locked: false, background: false },
-      selectedObjectId: null,
-    });
-    if (frame) {
-      drawVehicles(ctx, frame.vehiclePositions, viewport, null, frame.vehicleIds);
-      drawAgents(ctx, frame.positions, viewport, null, frame.agentIds);
-    }
-  }, [project, width, height, viewport, frame]);
-
-  return (
-    <canvas
-      ref={canvasRef}
-      width={MINI_PREVIEW_W}
-      height={MINI_PREVIEW_H}
-      className="w-full rounded-lg"
-      style={{ background: '#F5F3EC', aspectRatio: `${MINI_PREVIEW_W} / ${MINI_PREVIEW_H}` }}
-    />
   );
 }
 
