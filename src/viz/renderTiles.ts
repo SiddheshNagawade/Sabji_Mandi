@@ -9,7 +9,7 @@ import { ARROW_COLOR, ENTRANCE_BOTH_COLOR, ENTRANCE_IN_COLOR, ENTRANCE_OUT_COLOR
 // Blocks are rendered translucent (a clean, Minecraft-block-on-paper look)
 // rather than fully opaque; open ground isn't painted at all, so an
 // untouched cell just shows the canvas paper colour underneath.
-const TERRAIN_ALPHA = 0.6;
+export const TERRAIN_ALPHA = 0.6;
 const OBJECT_ALPHA = 0.62;
 export const CANVAS_PAPER_COLOR = '#F5F3EC';
 
@@ -197,7 +197,7 @@ function zoneColor(zoneId: number): string {
   return colors[(zoneId - 1) % colors.length];
 }
 
-function drawArrow(ctx: CanvasRenderingContext2D, v: Viewport, x: number, y: number, dirCode: number) {
+export function drawArrow(ctx: CanvasRenderingContext2D, v: Viewport, x: number, y: number, dirCode: number) {
   const d = FLOW_DIRS[dirCode];
   const z = v.zoom;
   const c = cellToScreen(v, x + 0.5, y + 0.5);

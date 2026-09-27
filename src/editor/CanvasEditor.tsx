@@ -6,8 +6,9 @@ import { TILE_INFO } from '../data/schema';
 import { PRIMARY_BLOCKS } from './blocks';
 import { applyBrushSize, floodFillIndices, idx, inBounds, quantizeDirection, rasterLine, rasterRect } from './grid';
 import { objectAtCell } from './objectLayer';
+import { fitToScreen } from './viewport';
 import type { LayerVisibility, Viewport } from '../viz/renderTiles';
-import { cellToScreen, drawScene, screenToCell } from '../viz/renderTiles';
+import { CANVAS_PAPER_COLOR, TERRAIN_ALPHA, cellToScreen, drawArrow, drawScene, screenToCell } from '../viz/renderTiles';
 
 // How close (in cells) to the current right/bottom edge triggers growth, and
 // how many cells to grow by each time — gives the user room to keep dragging
@@ -35,7 +36,7 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
   const containerRef = useRef<HTMLDivElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const bgImageRef = useRef<HTMLImageElement | null>(null);
-  const [, forceRender] = useState(0);
+  const [renderTick, forceRender] = useState(0);
 
   const project = useAppStore((s) => s.project);
   const layoutVersion = useAppStore((s) => s.layoutVersion);
@@ -76,14 +77,17 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
   const addCalibrationClick = useAppStore((s) => s.addCalibrationClick);
   const applyCalibration = useAppStore((s) => s.applyCalibration);
   const moveBackgroundBy = useAppStore((s) => s.moveBackgroundBy);
+  const viewport = useAppStore((s) => s.viewport);
+  const setViewport = useAppStore((s) => s.setViewport);
+  const setViewportSize = useAppStore((s) => s.setViewportSize);
+  const hoverCell = useAppStore((s) => s.hoverCell);
+  const setHoverCell = useAppStore((s) => s.setHoverCell);
 
   const width = project.grid.width;
   const height = project.grid.height;
   const layout = project.baseline;
   const vehicleTypeFootprints = project.demand.vehicleTypes;
 
-  const [viewport, setViewport] = useState<Viewport>({ originX: 20, originY: 20, zoom: 32 });
-  const [hoverCell, setHoverCell] = useState<XY | null>(null);
   const [measureEnd, setMeasureEnd] = useState<XY | null>(null);
   const [measureStart, setMeasureStart] = useState<XY | null>(null);
   const [previewRect, setPreviewRect] = useState<{ x0: number; y0: number; x1: number; y1: number } | null>(null);
@@ -127,12 +131,15 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
     const ro = new ResizeObserver(() => {
       canvas.width = el.clientWidth;
       canvas.height = el.clientHeight;
+      setViewportSize({ width: el.clientWidth, height: el.clientHeight });
       forceRender((n) => n + 1);
     });
     ro.observe(el);
     canvas.width = el.clientWidth;
     canvas.height = el.clientHeight;
+    setViewportSize({ width: el.clientWidth, height: el.clientHeight });
     return () => ro.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const lintCellSet = lintCells;
@@ -160,6 +167,27 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
       backgroundImageEl: bgImageRef.current,
       backgroundOpacity: project.background?.opacity,
     });
+
+    // Live stroke-in-progress preview: paintMapRef/arrowMapRef are refs (mutated
+    // per pointer move without a state update of their own), so without this the
+    // canvas would only show a stroke once it's committed on pointer-up. renderTick
+    // is bumped alongside those mutations to force this effect to re-run mid-drag.
+    if (paintMapRef.current.size > 0) {
+      const z = viewport.zoom;
+      const isEraser = tool === 'eraser';
+      ctx.globalAlpha = TERRAIN_ALPHA;
+      ctx.fillStyle = isEraser ? CANVAS_PAPER_COLOR : (TILE_INFO[brushTileId]?.color ?? '#999');
+      for (const c of paintMapRef.current.values()) {
+        const p = cellToScreen(viewport, c.x, c.y);
+        ctx.fillRect(p.x, p.y, z, z);
+      }
+      ctx.globalAlpha = 1;
+    }
+    if (arrowMapRef.current.size > 0) {
+      for (const a of arrowMapRef.current.values()) {
+        drawArrow(ctx, viewport, a.x, a.y, a.value);
+      }
+    }
 
     // Ephemeral overlays: preview rect, measure line, calibration points, pending arrow rect.
     if (previewRect) {
@@ -200,7 +228,7 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
       }
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [layoutVersion, viewport, layerVisible, showGrid, selectedObjectId, lintCellSet, previewRect, measureStart, measureEnd, calibrationClicks, hoverCell, tool, brushSize, stallSize, project.background]);
+  }, [layoutVersion, viewport, layerVisible, showGrid, selectedObjectId, lintCellSet, previewRect, measureStart, measureEnd, calibrationClicks, hoverCell, tool, brushTileId, brushSize, stallSize, project.background, renderTick]);
 
   const getCellFromEvent = useCallback(
     (e: { clientX: number; clientY: number }): XY => {
@@ -229,6 +257,7 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
       for (const c of expanded) {
         if (inBounds(c.x, c.y, width, height)) paintMapRef.current.set(`${c.x},${c.y}`, c);
       }
+      forceRender((n) => n + 1);
     },
     [brushSize, width, height],
   );
@@ -252,6 +281,7 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
           if (inBounds(c.x, c.y, width, height)) arrowMapRef.current.set(`${c.x},${c.y}`, { x: c.x, y: c.y, value: arrowDirCode });
         }
       }
+      forceRender((n) => n + 1);
     },
     [brushSize, width, height, arrowDirCode],
   );
@@ -540,7 +570,7 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
       }
       if (e.key === '[') setBrushSize(Math.max(1, brushSize - 1));
       if (e.key === ']') setBrushSize(Math.min(5, brushSize + 1));
-      if (e.key === '0') setViewport(fitToScreen(width, height, containerRef.current));
+      if (e.key === '0') setViewport(fitToScreenEl(width, height, containerRef.current));
       if (e.key.toLowerCase() === 'v') {
         setActiveBlock(PRIMARY_BLOCKS[0]);
         return;
@@ -563,7 +593,7 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    setViewport(fitToScreen(width, height, el));
+    setViewport(fitToScreenEl(width, height, el));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [project.meta.name]);
 
@@ -597,8 +627,6 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
     canvas.addEventListener('wheel', onWheel, { passive: false });
     return () => canvas.removeEventListener('wheel', onWheel);
   }, []);
-
-  const footerTile = hoverCell && inBounds(hoverCell.x, hoverCell.y, width, height) ? TILE_INFO[layout.terrain[idx(hoverCell.x, hoverCell.y, width)]] : null;
 
   const calibDialog = calibPromptOpen && (
     <div className="absolute inset-0 z-20 flex items-center justify-center bg-black/30">
@@ -640,16 +668,6 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
         onPointerUp={onPointerUp}
         onContextMenu={(e) => e.preventDefault()}
       />
-      <div
-        className="pointer-events-none absolute bottom-3 right-3 flex items-center gap-2 rounded-full px-3 py-1 text-[11px] text-neutral-500 shadow-sm"
-        style={{ background: 'rgba(255,255,255,0.85)', border: '1px solid var(--color-border)', backdropFilter: 'blur(4px)' }}
-      >
-        <span>
-          {hoverCell ? `(${hoverCell.x}, ${hoverCell.y})` : '—'} {footerTile && footerTile.name !== 'Open ground' ? `· ${footerTile.name}` : ''}
-        </span>
-        <span className="text-neutral-300">|</span>
-        <span>{Math.round(viewport.zoom)}px/cell</span>
-      </div>
       {calibDialog}
     </div>
   );
@@ -676,12 +694,6 @@ function ghostCells(_tool: string, hover: XY, brushSize: number, _stallSize: { w
   return applyBrushSize([hover], brushSize);
 }
 
-function fitToScreen(width: number, height: number, el: HTMLDivElement | null): Viewport {
-  const cw = el?.clientWidth ?? 900;
-  const ch = el?.clientHeight ?? 700;
-  // Prefer chunky 32px cells; only shrink below that for a grid too big to fit.
-  const zoom = Math.max(4, Math.min(cw / width, ch / height, 32));
-  const originX = (cw - width * zoom) / 2;
-  const originY = (ch - height * zoom) / 2;
-  return { originX, originY, zoom };
+function fitToScreenEl(width: number, height: number, el: HTMLDivElement | null): Viewport {
+  return fitToScreen(width, height, el?.clientWidth ?? 900, el?.clientHeight ?? 700);
 }

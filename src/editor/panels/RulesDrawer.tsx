@@ -9,7 +9,7 @@ export function RulesDrawer() {
   const phaseCount = useAppStore((s) => s.project.baseline.phases.length);
 
   return (
-    <div className="pointer-events-auto absolute right-4 top-16 flex flex-col items-end gap-2">
+    <div className="pointer-events-auto absolute right-4 top-4 flex flex-col items-end gap-2">
       <button
         onClick={() => setOpen((v) => !v)}
         className="flex items-center gap-1.5 rounded-2xl px-3 py-2 text-xs font-medium transition"

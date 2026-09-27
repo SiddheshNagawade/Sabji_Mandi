@@ -7,6 +7,8 @@ import { saveProjectToLibrary, setCurrentProjectId } from '../data/projectLibrar
 import { rebuildObjectLayer } from '../editor/objectLayer';
 import type { BlockDef } from '../editor/blocks';
 import { growLayout } from '../editor/growGrid';
+import { fitToScreen, zoomAroundPoint } from '../editor/viewport';
+import type { Viewport } from '../viz/renderTiles';
 import {
   buildAddBarrierCommand,
   buildAddEntranceCommand,
@@ -78,6 +80,9 @@ interface AppState {
   bgMode: 'none' | 'move' | 'calibrate';
   calibrationClicks: XY[];
   focusCell: XY | null;
+  viewport: Viewport;
+  viewportSize: { width: number; height: number };
+  hoverCell: XY | null;
 
   setProject: (project: Project) => void;
   newProject: (name?: string, width?: number, height?: number) => void;
@@ -134,6 +139,12 @@ interface AppState {
 
   /** Grows the grid to at least newWidth x newHeight, preserving all content. No-op if already that size or larger. */
   growGrid: (newWidth: number, newHeight: number) => void;
+
+  setViewport: (update: Viewport | ((v: Viewport) => Viewport)) => void;
+  setViewportSize: (size: { width: number; height: number }) => void;
+  zoomBy: (factor: number) => void;
+  resetZoom: () => void;
+  setHoverCell: (cell: XY | null) => void;
 }
 
 export const useAppStore = create<AppState>((set, get) => ({
@@ -163,6 +174,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   bgMode: 'none',
   calibrationClicks: [],
   focusCell: null,
+  viewport: { originX: 20, originY: 20, zoom: 32 },
+  viewportSize: { width: 900, height: 700 },
+  hoverCell: null,
 
   setProject: (project) => {
     set({ project, history: [], historyIndex: 0, layoutVersion: 0, selectedObjectId: null, activeScenarioId: 'baseline' });
@@ -431,6 +445,18 @@ export const useAppStore = create<AppState>((set, get) => ({
     });
     void get().autosave();
   },
+
+  setViewport: (update) => set((s) => ({ viewport: typeof update === 'function' ? (update as (v: Viewport) => Viewport)(s.viewport) : update })),
+  setViewportSize: (size) => set({ viewportSize: size }),
+  zoomBy: (factor) => {
+    const { viewport, viewportSize } = get();
+    set({ viewport: zoomAroundPoint(viewport, factor, viewportSize.width / 2, viewportSize.height / 2) });
+  },
+  resetZoom: () => {
+    const { project, viewportSize } = get();
+    set({ viewport: fitToScreen(project.grid.width, project.grid.height, viewportSize.width, viewportSize.height) });
+  },
+  setHoverCell: (cell) => set({ hoverCell: cell }),
 }));
 
 function nextEdge(edge: Dir4): Dir4 {

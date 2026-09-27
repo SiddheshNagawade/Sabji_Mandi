@@ -5,7 +5,7 @@ import { LINT_ERROR_COLOR, LINT_INFO_COLOR, LINT_WARNING_COLOR } from '../../viz
 
 const SEVERITY_COLOR = { error: LINT_ERROR_COLOR, warning: LINT_WARNING_COLOR, info: LINT_INFO_COLOR };
 
-export function LinterPanel() {
+export function LinterPanel({ embedded = false }: { embedded?: boolean }) {
   const layout = useAppStore((s) => s.project.baseline);
   const width = useAppStore((s) => s.project.grid.width);
   const height = useAppStore((s) => s.project.grid.height);
@@ -17,17 +17,19 @@ export function LinterPanel() {
   const warns = warnings.filter((w) => w.severity === 'warning').length;
 
   return (
-    <div className="flex flex-col overflow-hidden border-t border-neutral-200">
-      <div className="px-2 py-1 text-xs font-semibold text-neutral-500">
-        Linter {errors > 0 ? `— ${errors} error${errors > 1 ? 's' : ''}` : warns > 0 ? `— ${warns} warning${warns > 1 ? 's' : ''}` : '— all clear'}
-      </div>
-      <div className="max-h-40 overflow-y-auto px-2 pb-2 text-xs">
-        {warnings.length === 0 && <p className="text-neutral-400">No issues found.</p>}
+    <div className={embedded ? '' : 'flex flex-col overflow-hidden border-t border-neutral-200'}>
+      {!embedded && (
+        <div className="px-2 py-1 text-xs font-semibold text-neutral-500">
+          Linter {errors > 0 ? `— ${errors} error${errors > 1 ? 's' : ''}` : warns > 0 ? `— ${warns} warning${warns > 1 ? 's' : ''}` : '— all clear'}
+        </div>
+      )}
+      <div className={embedded ? 'max-h-52 overflow-y-auto text-xs' : 'max-h-40 overflow-y-auto px-2 pb-2 text-xs'}>
+        {warnings.length === 0 && <p style={{ color: 'var(--color-text-faint)' }}>No issues found — this layout is ready to simulate.</p>}
         <ul className="space-y-1">
           {warnings.map((w) => (
             <li key={w.id}>
               <button
-                className="flex w-full items-start gap-1.5 rounded px-1 py-0.5 text-left hover:bg-neutral-100"
+                className="flex w-full items-start gap-1.5 rounded px-1 py-0.5 text-left transition hover:bg-[var(--color-bg)]"
                 onClick={() => w.cells[0] && setFocusCell(w.cells[0])}
               >
                 <span className="mt-0.5 inline-block h-2 w-2 shrink-0 rounded-full" style={{ background: SEVERITY_COLOR[w.severity] }} />
