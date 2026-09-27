@@ -24,5 +24,10 @@ export function migrateProjectData(raw: Record<string, unknown>): Record<string,
     data = step(data);
     version = typeof data.schemaVersion === 'number' ? data.schemaVersion : version + 1;
   }
+  // Structural backfill, not a versioned migration: projects saved before the
+  // project library existed have no stable id.
+  if (typeof data.id !== 'string' || data.id.length === 0) {
+    data = { ...data, id: crypto.randomUUID() };
+  }
   return data;
 }

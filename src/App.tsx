@@ -1,21 +1,21 @@
 import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from './app/store';
-import { loadAutosave } from './data/io';
-import { EditorScreen, SimulateScreen, CompareScreen, DataScreen, HistoryScreen, PitchScreen } from './screens';
+import { getCurrentProjectId, loadProjectFromLibrary } from './data/projectLibrary';
+import { ProjectsScreen, EditorScreen, SimulateScreen, CompareScreen, DataScreen, HistoryScreen, PitchScreen } from './screens';
 
 const TABS = [
+  { id: 'projects', label: 'Projects' },
   { id: 'editor', label: 'Editor' },
   { id: 'simulate', label: 'Simulate' },
   { id: 'compare', label: 'Compare' },
   { id: 'data', label: 'Data' },
   { id: 'history', label: 'History' },
-  { id: 'pitch', label: 'Pitch' },
 ] as const;
 
-type TabId = (typeof TABS)[number]['id'];
+type TabId = (typeof TABS)[number]['id'] | 'pitch';
 
 export default function App() {
-  const [tab, setTab] = useState<TabId>('editor');
+  const [tab, setTab] = useState<TabId>('projects');
   const project = useAppStore((s) => s.project);
   const undo = useAppStore((s) => s.undo);
   const redo = useAppStore((s) => s.redo);
@@ -27,9 +27,12 @@ export default function App() {
 
   useEffect(() => {
     let cancelled = false;
-    void loadAutosave().then((saved) => {
+    void (async () => {
+      const currentId = await getCurrentProjectId();
+      if (!currentId) return;
+      const saved = await loadProjectFromLibrary(currentId);
       if (saved && !cancelled) setProject(saved);
-    });
+    })();
     return () => {
       cancelled = true;
     };
@@ -83,7 +86,7 @@ export default function App() {
           Mandi Flow Simulator
         </span>
         <nav className="flex gap-1 rounded-xl p-1" style={{ background: 'var(--color-bg)' }}>
-          {TABS.filter((t) => t.id !== 'pitch').map((t) => (
+          {TABS.map((t) => (
             <button
               key={t.id}
               onClick={() => setTab(t.id)}
@@ -98,21 +101,23 @@ export default function App() {
             </button>
           ))}
         </nav>
-        <div className="ml-auto flex items-center gap-2 text-[13px]" style={{ color: 'var(--color-text-muted)' }}>
-          <span className="mr-1 hidden sm:inline">{project.meta.name}</span>
-          <button className="rounded-lg px-2.5 py-1.5 font-medium transition hover:bg-[var(--color-bg)]" onClick={undo} title="Undo (Ctrl+Z)">
-            ↶ Undo
-          </button>
-          <button className="rounded-lg px-2.5 py-1.5 font-medium transition hover:bg-[var(--color-bg)]" onClick={redo} title="Redo (Ctrl+Shift+Z)">
-            ↷ Redo
-          </button>
-          <div className="mx-0.5 h-5 w-px" style={{ background: 'var(--color-border)' }} />
-          <button className="rounded-lg px-2.5 py-1.5 font-medium transition hover:bg-[var(--color-bg)]" onClick={saveProjectFile}>
-            Save
-          </button>
-          <button className="rounded-lg px-2.5 py-1.5 font-medium transition hover:bg-[var(--color-bg)]" onClick={() => fileInputRef.current?.click()}>
-            Load
-          </button>
+        <div className="ml-auto flex items-center gap-1 text-[13px]" style={{ color: 'var(--color-text-muted)' }}>
+          <span className="mr-2 hidden truncate sm:inline" style={{ maxWidth: 180 }}>
+            {project.meta.name}
+          </span>
+          <IconButton title="Undo (Ctrl+Z)" onClick={undo}>
+            ↶
+          </IconButton>
+          <IconButton title="Redo (Ctrl+Shift+Z)" onClick={redo}>
+            ↷
+          </IconButton>
+          <div className="mx-1 h-5 w-px" style={{ background: 'var(--color-border)' }} />
+          <IconButton title="Save to a file" onClick={saveProjectFile}>
+            💾
+          </IconButton>
+          <IconButton title="Load from a file" onClick={() => fileInputRef.current?.click()}>
+            📂
+          </IconButton>
           <input
             ref={fileInputRef}
             type="file"
@@ -127,6 +132,7 @@ export default function App() {
         </div>
       </header>
       <main className="min-h-0 flex-1">
+        {tab === 'projects' && <ProjectsScreen onOpen={() => setTab('editor')} />}
         {tab === 'editor' && <EditorScreen />}
         {tab === 'simulate' && <SimulateScreen />}
         {tab === 'compare' && <CompareScreen />}
@@ -134,5 +140,18 @@ export default function App() {
         {tab === 'history' && <HistoryScreen />}
       </main>
     </div>
+  );
+}
+
+function IconButton({ title, onClick, children }: { title: string; onClick: () => void; children: string }) {
+  return (
+    <button
+      title={title}
+      aria-label={title}
+      onClick={onClick}
+      className="flex h-8 w-8 items-center justify-center rounded-lg text-[15px] transition hover:bg-[var(--color-bg)]"
+    >
+      {children}
+    </button>
   );
 }

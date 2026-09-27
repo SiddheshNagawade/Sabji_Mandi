@@ -1,7 +1,9 @@
 import { create } from 'zustand';
 import type { CellChange, Dir4, EntranceType, Layout, LayoutObject, Phase, Project, ProduceCategory, VehicleType, XY } from '../data/schema';
+import { TileId } from '../data/schema';
 import { createBlankProject } from '../data/defaults';
-import { downloadProjectFile, readProjectFile, saveAutosave } from '../data/io';
+import { downloadProjectFile, readProjectFile } from '../data/io';
+import { saveProjectToLibrary, setCurrentProjectId } from '../data/projectLibrary';
 import { rebuildObjectLayer } from '../editor/objectLayer';
 import type { BlockDef } from '../editor/blocks';
 import { growLayout } from '../editor/growGrid';
@@ -57,6 +59,7 @@ interface AppState {
 
   // Editor UI state
   activeBlockId: string;
+  wallMovable: boolean; // false = fixed Wall terrain, true = a schedulable Barrier object
   tool: EditorTool;
   paintLayer: PaintLayer;
   brushTileId: number;
@@ -87,6 +90,7 @@ interface AppState {
   redo: () => void;
 
   setActiveBlock: (block: BlockDef) => void;
+  setWallMovable: (movable: boolean) => void;
   setTool: (tool: EditorTool) => void;
   setPaintLayer: (layer: PaintLayer) => void;
   setBrushTile: (tileId: number) => void;
@@ -140,6 +144,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   layoutVersion: 0,
 
   activeBlockId: 'select',
+  wallMovable: false,
   tool: 'select',
   paintLayer: 'terrain',
   brushTileId: 0,
@@ -160,14 +165,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   focusCell: null,
 
   setProject: (project) => {
-    set({ project, history: [], historyIndex: 0, layoutVersion: 0, selectedObjectId: null });
+    set({ project, history: [], historyIndex: 0, layoutVersion: 0, selectedObjectId: null, activeScenarioId: 'baseline' });
+    void setCurrentProjectId(project.id);
     void get().autosave();
   },
 
   newProject: (name = 'Untitled Mandi', width, height) => {
-    const project = createBlankProject(name, width, height);
-    set({ project, history: [], historyIndex: 0, layoutVersion: 0, selectedObjectId: null, activeScenarioId: 'baseline' });
-    void get().autosave();
+    get().setProject(createBlankProject(name, width, height));
   },
 
   loadProjectFile: async (file: File) => {
@@ -180,7 +184,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   autosave: async () => {
-    await saveAutosave(get().project);
+    const project = get().project;
+    await saveProjectToLibrary(project);
+    await setCurrentProjectId(project.id);
   },
 
   applyCommand: (cmd) => {
@@ -245,9 +251,6 @@ export const useAppStore = create<AppState>((set, get) => ({
       case 'select':
         set({ tool: 'select' });
         break;
-      case 'erase':
-        set({ tool: 'eraser' });
-        break;
       case 'terrain':
         set({ tool: 'brush', paintLayer: 'terrain', brushTileId: block.tileId ?? 0 });
         break;
@@ -257,8 +260,8 @@ export const useAppStore = create<AppState>((set, get) => ({
       case 'entrance':
         set({ tool: 'entrance' });
         break;
-      case 'barrier':
-        set({ tool: 'barrier' });
+      case 'wall_or_barrier':
+        set(get().wallMovable ? { tool: 'barrier' } : { tool: 'brush', paintLayer: 'terrain', brushTileId: TileId.Wall });
         break;
       case 'vehicle_bay':
         set({ tool: 'vehicle_bay' });
@@ -266,6 +269,13 @@ export const useAppStore = create<AppState>((set, get) => ({
       case 'arrow':
         set({ tool: 'arrow' });
         break;
+    }
+  },
+
+  setWallMovable: (movable) => {
+    set({ wallMovable: movable });
+    if (get().activeBlockId === 'wall') {
+      set(movable ? { tool: 'barrier' } : { tool: 'brush', paintLayer: 'terrain', brushTileId: TileId.Wall });
     }
   },
   setTool: (tool) => set({ tool, selectedObjectId: null }),

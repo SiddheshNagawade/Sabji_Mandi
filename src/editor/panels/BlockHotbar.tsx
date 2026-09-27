@@ -41,29 +41,42 @@ export function BlockHotbar() {
   const activeBlockId = useAppStore((s) => s.activeBlockId);
   const setActiveBlock = useAppStore((s) => s.setActiveBlock);
   const [showMore, setShowMore] = useState(false);
+  const [optionsOpen, setOptionsOpen] = useState(false);
   const active = findBlock(activeBlockId);
+
+  function selectBlock(b: BlockDef) {
+    setActiveBlock(b);
+    setOptionsOpen(false);
+  }
 
   return (
     <div className="pointer-events-none absolute inset-x-0 bottom-5 flex flex-col items-center gap-2 px-4">
-      {active.category !== 'select' && <BlockOptions block={active} />}
+      {optionsOpen && active.hasOptions && <BlockOptions block={active} />}
 
       {showMore && (
         <div className="pointer-events-auto flex flex-wrap justify-center gap-1.5 rounded-2xl px-3 py-2" style={cardStyle}>
           {SECONDARY_BLOCKS.map((b) => (
-            <HotbarSlot key={b.id} block={b} active={b.id === activeBlockId} onClick={() => setActiveBlock(b)} />
+            <HotbarSlot key={b.id} block={b} active={b.id === activeBlockId} onClick={() => selectBlock(b)} />
           ))}
         </div>
       )}
 
       <div className="pointer-events-auto flex items-center gap-1.5 rounded-2xl px-2.5 py-2" style={cardStyle}>
         {PRIMARY_BLOCKS.map((b) => (
-          <HotbarSlot key={b.id} block={b} active={b.id === activeBlockId} onClick={() => setActiveBlock(b)} />
+          <HotbarSlot
+            key={b.id}
+            block={b}
+            active={b.id === activeBlockId}
+            onClick={() => selectBlock(b)}
+            caretOpen={b.id === activeBlockId && optionsOpen}
+            onToggleCaret={b.hasOptions ? () => setOptionsOpen((v) => !v) : undefined}
+          />
         ))}
         <div className="mx-1 h-9 w-px" style={{ background: 'var(--color-border)' }} />
         <button
           title="More materials"
           onClick={() => setShowMore((v) => !v)}
-          className="flex h-11 w-11 flex-col items-center justify-center rounded-xl text-[10px] font-medium transition"
+          className="flex h-12 min-w-12 flex-col items-center justify-center rounded-xl text-[9px] font-medium transition"
           style={showMore ? activeSlotStyle('#8B8880') : idleSlotStyle}
         >
           <span className="text-base leading-none">···</span>
@@ -93,8 +106,20 @@ function activeSlotStyle(color: string): CSSProperties {
 }
 const idleSlotStyle: CSSProperties = { background: '#F0EEE7', color: 'var(--color-text-muted)' };
 
-function HotbarSlot({ block, active, onClick }: { block: BlockDef; active: boolean; onClick: () => void }) {
-  const isPicker = block.category === 'select' || block.category === 'erase';
+function HotbarSlot({
+  block,
+  active,
+  onClick,
+  caretOpen,
+  onToggleCaret,
+}: {
+  block: BlockDef;
+  active: boolean;
+  onClick: () => void;
+  caretOpen?: boolean;
+  onToggleCaret?: () => void;
+}) {
+  const isPicker = block.category === 'select';
   return (
     <button
       title={`${block.label}${block.hotkey ? ` (${block.hotkey})` : ''}`}
@@ -102,11 +127,23 @@ function HotbarSlot({ block, active, onClick }: { block: BlockDef; active: boole
       className="relative flex h-12 min-w-12 flex-col items-center justify-center gap-0.5 rounded-xl px-1.5 text-[9px] font-medium leading-none transition active:scale-95"
       style={active ? activeSlotStyle(block.color) : isPicker ? idleSlotStyle : idleStyleFor(block.color)}
     >
-      {block.hotkey && (
-        <span className="absolute left-1 top-0.5 text-[8px] opacity-60">{block.hotkey}</span>
-      )}
+      {block.hotkey && <span className="absolute left-1 top-0.5 text-[8px] opacity-60">{block.hotkey}</span>}
       <span className="h-3.5 w-3.5 rounded-[4px]" style={{ background: block.category === 'select' ? 'transparent' : block.color, border: block.category === 'select' ? '2px solid currentColor' : 'none' }} />
       <span className="whitespace-nowrap">{block.label.split(' ')[0]}</span>
+      {active && onToggleCaret && (
+        <span
+          role="button"
+          title="More options"
+          onClick={(e) => {
+            e.stopPropagation();
+            onToggleCaret();
+          }}
+          className="absolute -right-1 -top-1 flex h-4 w-4 items-center justify-center rounded-full text-[9px] transition"
+          style={{ background: caretOpen ? '#fff' : 'rgba(255,255,255,0.85)', color: '#33312C', boxShadow: '0 1px 3px rgba(0,0,0,0.25)' }}
+        >
+          {caretOpen ? '▴' : '▾'}
+        </span>
+      )}
     </button>
   );
 }
@@ -116,8 +153,18 @@ function BlockOptions({ block }: { block: BlockDef }) {
     <div className="pointer-events-auto flex max-w-xl flex-wrap items-center justify-center gap-3 rounded-2xl px-4 py-2.5 text-xs" style={cardStyle}>
       {block.category === 'terrain' && <BrushSizeOption />}
       {block.category === 'stall' && <StallOptions />}
-      {block.category === 'entrance' && <EntranceOptions />}
-      {(block.category === 'entrance' || block.category === 'barrier') && <BrushSizeOption />}
+      {block.category === 'entrance' && (
+        <>
+          <EntranceOptions />
+          <BrushSizeOption />
+        </>
+      )}
+      {block.category === 'wall_or_barrier' && (
+        <>
+          <WallMovableOption />
+          <BrushSizeOption />
+        </>
+      )}
       {block.category === 'vehicle_bay' && <VehicleBayOptions />}
       {block.category === 'arrow' && (
         <>
@@ -126,6 +173,21 @@ function BlockOptions({ block }: { block: BlockDef }) {
         </>
       )}
     </div>
+  );
+}
+
+function WallMovableOption() {
+  const wallMovable = useAppStore((s) => s.wallMovable);
+  const setWallMovable = useAppStore((s) => s.setWallMovable);
+  return (
+    <OptionGroup label="Kind">
+      <button onClick={() => setWallMovable(false)} className="rounded-md px-2 py-1 text-[11px] font-medium transition" style={pillStyle(!wallMovable)}>
+        Fixed
+      </button>
+      <button onClick={() => setWallMovable(true)} className="rounded-md px-2 py-1 text-[11px] font-medium transition" style={pillStyle(wallMovable)} title="Can be opened or closed on a schedule from Rules">
+        Movable
+      </button>
+    </OptionGroup>
   );
 }
 

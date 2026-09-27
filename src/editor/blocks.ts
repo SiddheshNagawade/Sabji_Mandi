@@ -3,10 +3,15 @@
 // no abstract "tools". Each block maps onto the existing editor tool/layer
 // machinery in app/store.ts so the underlying command/undo system is reused
 // unchanged.
+//
+// Kept deliberately short: right-click always erases (no separate Erase
+// block competing with it), and Wall/Barrier — a fixed vs. a schedulable
+// block — are one "Wall" block with a Movable toggle rather than two
+// look-alike hotbar slots.
 
 import { TileId } from '../data/schema';
 
-export type BlockCategory = 'select' | 'terrain' | 'stall' | 'entrance' | 'barrier' | 'vehicle_bay' | 'arrow' | 'erase';
+export type BlockCategory = 'select' | 'terrain' | 'stall' | 'entrance' | 'wall_or_barrier' | 'vehicle_bay' | 'arrow';
 
 export interface BlockDef {
   id: string;
@@ -16,18 +21,17 @@ export interface BlockDef {
   hotkey: string;
   category: BlockCategory;
   tileId?: number;
+  hasOptions?: boolean;
 }
 
 export const PRIMARY_BLOCKS: BlockDef[] = [
   { id: 'select', label: 'Select', hint: 'Click a stall, entrance or cell to inspect and edit it.', color: '#8B8880', hotkey: 'V', category: 'select' },
-  { id: 'path', label: 'Path', hint: 'Drag to lay walkable aisle. Shift-drag fills a rectangle. Right-click erases.', color: '#A9743B', hotkey: '1', category: 'terrain', tileId: TileId.Path },
-  { id: 'stall', label: 'Stall', hint: 'Drag to size a stall, or click to place the default size.', color: '#8A7FB0', hotkey: '2', category: 'stall' },
-  { id: 'entrance', label: 'Entrance', hint: 'Drag along the edge buyers use to enter or leave the market.', color: '#2BB673', hotkey: '3', category: 'entrance' },
-  { id: 'wall', label: 'Wall', hint: 'Blocks everyone — building edges and fixed structures. Shift-drag fills a rectangle.', color: '#4B4B4B', hotkey: '4', category: 'terrain', tileId: TileId.Wall },
-  { id: 'arrow', label: 'Arrow', hint: 'Drag to mark a one-way walking direction. Pick the direction below.', color: '#1D6FD8', hotkey: '5', category: 'arrow' },
-  { id: 'barrier', label: 'Barrier', hint: 'A movable block — open or close it on a schedule from Rules.', color: '#B33A3A', hotkey: '6', category: 'barrier' },
-  { id: 'vehicle_bay', label: 'Vehicle bay', hint: 'Where handcarts, two-wheelers or tempos load and unload.', color: '#4D7CC7', hotkey: '7', category: 'vehicle_bay' },
-  { id: 'erase', label: 'Erase', hint: 'Click or drag to clear painted cells back to open ground. To remove a stall, entrance or other object, select it and press Delete.', color: '#C9C4B8', hotkey: '8', category: 'erase' },
+  { id: 'path', label: 'Path', hint: 'Drag to lay walkable aisle. Shift-drag fills a rectangle. Right-click erases.', color: '#A9743B', hotkey: '1', category: 'terrain', tileId: TileId.Path, hasOptions: true },
+  { id: 'stall', label: 'Stall', hint: 'Drag to size a stall, or click for the default size.', color: '#8A7FB0', hotkey: '2', category: 'stall', hasOptions: true },
+  { id: 'entrance', label: 'Entrance', hint: 'Drag along the edge buyers use to enter or leave the market.', color: '#2BB673', hotkey: '3', category: 'entrance', hasOptions: true },
+  { id: 'wall', label: 'Wall', hint: 'Drag to block movement. Shift-drag fills a rectangle. Right-click erases.', color: '#4B4B4B', hotkey: '4', category: 'wall_or_barrier', hasOptions: true },
+  { id: 'arrow', label: 'Arrow', hint: 'Drag to mark a one-way walking direction — the direction follows your drag.', color: '#1D6FD8', hotkey: '5', category: 'arrow', hasOptions: true },
+  { id: 'vehicle_bay', label: 'Vehicle bay', hint: 'Where handcarts, two-wheelers or tempos load and unload.', color: '#4D7CC7', hotkey: '6', category: 'vehicle_bay', hasOptions: true },
 ];
 
 export const SECONDARY_BLOCKS: BlockDef[] = [

@@ -1,3 +1,4 @@
+export { ProjectsScreen } from './ProjectsScreen';
 export { EditorScreen } from './EditorScreen';
 export { SimulateScreen } from './SimulateScreen';
 export { CompareScreen } from './CompareScreen';

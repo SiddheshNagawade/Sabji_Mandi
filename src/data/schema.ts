@@ -345,6 +345,8 @@ export interface CalibrationSet {
 
 export interface Project {
   schemaVersion: number;
+  /** Stable identity for this project in the project library (src/data/projectLibrary.ts), independent of its (editable, non-unique) name. */
+  id: string;
   meta: { name: string; createdAt: string; updatedAt: string; isSyntheticExample?: boolean };
   grid: { width: number; height: number; cellSizeM: Param };
   background?: BackgroundImage;

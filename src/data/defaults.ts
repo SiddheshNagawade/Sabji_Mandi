@@ -7,9 +7,11 @@ import { SCHEMA_VERSION } from './schema';
 
 // A new project starts small and chunky at the default 32px/cell zoom, then
 // grows to the right/down as you draw near its edge (see editor/growGrid.ts).
-export const DEFAULT_GRID_WIDTH = 24;
-export const DEFAULT_GRID_HEIGHT = 18;
-export const DEFAULT_CELL_SIZE_M = 0.5;
+// One cell is one metre, so the grid dimensions read directly as the size of
+// the real market in metres.
+export const DEFAULT_GRID_WIDTH = 16;
+export const DEFAULT_GRID_HEIGHT = 12;
+export const DEFAULT_CELL_SIZE_M = 1.0;
 
 export function createEmptyLayout(width: number, height: number): Layout {
   const n = width * height;
@@ -134,6 +136,7 @@ export function createBlankProject(name = 'Untitled Mandi', width = DEFAULT_GRID
   const now = new Date().toISOString();
   return {
     schemaVersion: SCHEMA_VERSION,
+    id: crypto.randomUUID(),
     meta: { name, createdAt: now, updatedAt: now },
     grid: { width, height, cellSizeM: assumed(DEFAULT_CELL_SIZE_M, 'm') },
     baseline: createEmptyLayout(width, height),

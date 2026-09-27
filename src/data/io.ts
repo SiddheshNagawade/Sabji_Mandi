@@ -97,20 +97,3 @@ export function readProjectFile(file: File): Promise<Project> {
   });
 }
 
-const AUTOSAVE_KEY = 'mandi-sim-autosave';
-
-export async function saveAutosave(project: Project): Promise<void> {
-  const { set } = await import('idb-keyval');
-  await set(AUTOSAVE_KEY, serializeProject(project));
-}
-
-export async function loadAutosave(): Promise<Project | undefined> {
-  const { get } = await import('idb-keyval');
-  const json = await get<string>(AUTOSAVE_KEY);
-  return json ? deserializeProject(json) : undefined;
-}
-
-export async function clearAutosave(): Promise<void> {
-  const { del } = await import('idb-keyval');
-  await del(AUTOSAVE_KEY);
-}
