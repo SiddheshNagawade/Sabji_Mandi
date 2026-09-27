@@ -3,7 +3,7 @@ import type { CellChange, Dir4, EntranceType, Layout, LayoutObject, Phase, Proje
 import { TileId } from '../data/schema';
 import { createBlankProject } from '../data/defaults';
 import { downloadProjectFile, readProjectFile, serializeLayout } from '../data/io';
-import { saveProjectToLibrary, setCurrentProjectId } from '../data/projectLibrary';
+import { saveProjectToLibrary, setCurrentProjectId, uniqueProjectName } from '../data/projectLibrary';
 import { rebuildObjectLayer } from '../editor/objectLayer';
 import type { BlockDef } from '../editor/blocks';
 import { growLayout, shiftBackground } from '../editor/growGrid';
@@ -86,7 +86,7 @@ interface AppState {
   propertiesWidth: number;
 
   setProject: (project: Project) => void;
-  newProject: (name?: string, width?: number, height?: number) => void;
+  newProject: (name?: string, width?: number, height?: number) => Promise<void>;
   loadProjectFile: (file: File) => Promise<void>;
   saveProjectFile: () => void;
   autosave: () => Promise<void>;
@@ -195,12 +195,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     void get().autosave();
   },
 
-  newProject: (name = 'Untitled Mandi', width, height) => {
-    get().setProject(createBlankProject(name, width, height));
+  newProject: async (name = 'Untitled Mandi', width, height) => {
+    const uniqueName = await uniqueProjectName(name);
+    get().setProject(createBlankProject(uniqueName, width, height));
   },
 
   loadProjectFile: async (file: File) => {
     const project = await readProjectFile(file);
+    project.meta.name = await uniqueProjectName(project.meta.name, project.id);
     get().setProject(project);
   },
 

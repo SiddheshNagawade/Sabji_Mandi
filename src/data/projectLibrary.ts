@@ -100,6 +100,16 @@ export async function listProjectSummaries(): Promise<ProjectSummary[]> {
   return [...index].sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
 }
 
+/** Appends " 2", " 3", … to `desired` until it no longer collides with another project's name. */
+export async function uniqueProjectName(desired: string, excludeId?: string): Promise<string> {
+  const index = await readIndex();
+  const taken = new Set(index.filter((p) => p.id !== excludeId).map((p) => p.name));
+  if (!taken.has(desired)) return desired;
+  let n = 2;
+  while (taken.has(`${desired} ${n}`)) n++;
+  return `${desired} ${n}`;
+}
+
 export async function saveProjectToLibrary(project: Project): Promise<void> {
   const { set } = await import('idb-keyval');
   await set(projectKey(project.id), serializeProject(project));
@@ -122,7 +132,7 @@ export async function deleteProjectFromLibrary(id: string): Promise<void> {
 export async function renameProjectInLibrary(id: string, name: string): Promise<void> {
   const project = await loadProjectFromLibrary(id);
   if (!project) return;
-  project.meta.name = name;
+  project.meta.name = await uniqueProjectName(name, id);
   project.meta.updatedAt = new Date().toISOString();
   await saveProjectToLibrary(project);
 }
@@ -131,10 +141,11 @@ export async function duplicateProjectInLibrary(id: string, newName?: string): P
   const original = await loadProjectFromLibrary(id);
   if (!original) return undefined;
   const now = new Date().toISOString();
+  const desiredName = newName ?? `${original.meta.name} copy`;
   const copy: Project = {
     ...original,
     id: crypto.randomUUID(),
-    meta: { ...original.meta, name: newName ?? `${original.meta.name} copy`, createdAt: now, updatedAt: now, isSyntheticExample: undefined },
+    meta: { ...original.meta, name: await uniqueProjectName(desiredName), createdAt: now, updatedAt: now, isSyntheticExample: undefined },
   };
   await saveProjectToLibrary(copy);
   return copy;

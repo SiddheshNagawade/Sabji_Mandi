@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { useAppStore } from '../app/store';
 import type { Project } from '../data/schema';
 import type { ProjectSummary } from '../data/projectLibrary';
-import { deleteProjectFromLibrary, duplicateProjectInLibrary, listProjectSummaries, loadProjectFromLibrary, renameProjectInLibrary } from '../data/projectLibrary';
+import { deleteProjectFromLibrary, duplicateProjectInLibrary, listProjectSummaries, loadProjectFromLibrary, renameProjectInLibrary, uniqueProjectName } from '../data/projectLibrary';
 import { DEMO_MARKETS } from '../data/demoProjects';
 
 function relativeTime(iso: string): string {
@@ -23,6 +23,7 @@ export function ProjectsScreen({ onOpen }: { onOpen: () => void }) {
   const [projects, setProjects] = useState<ProjectSummary[] | null>(null);
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState('');
+  const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
 
   async function refresh() {
     setProjects(await listProjectSummaries());
@@ -40,13 +41,15 @@ export function ProjectsScreen({ onOpen }: { onOpen: () => void }) {
     }
   }
 
-  function createBlank() {
-    newProject();
+  async function createBlank() {
+    await newProject();
     onOpen();
   }
 
-  function openDemo(build: () => Project) {
-    setProject(build());
+  async function openDemo(build: () => Project) {
+    const project = build();
+    project.meta.name = await uniqueProjectName(project.meta.name);
+    setProject(project);
     onOpen();
   }
 
@@ -55,9 +58,10 @@ export function ProjectsScreen({ onOpen }: { onOpen: () => void }) {
     if (copy) await refresh();
   }
 
-  async function remove(id: string, name: string) {
-    if (!window.confirm(`Delete "${name}"? This can't be undone.`)) return;
+  async function remove(id: string) {
+    setConfirmDeleteId(null);
     await deleteProjectFromLibrary(id);
+    if (currentProjectId === id) void newProject();
     await refresh();
   }
 
@@ -83,7 +87,7 @@ export function ProjectsScreen({ onOpen }: { onOpen: () => void }) {
           </div>
           <div className="flex gap-2">
             <button
-              onClick={createBlank}
+              onClick={() => void createBlank()}
               className="rounded-lg px-3 py-2 text-sm font-medium text-white transition"
               style={{ background: 'var(--color-accent)' }}
             >
@@ -103,7 +107,7 @@ export function ProjectsScreen({ onOpen }: { onOpen: () => void }) {
             {DEMO_MARKETS.map((demo) => (
               <button
                 key={demo.id}
-                onClick={() => openDemo(demo.build)}
+                onClick={() => void openDemo(demo.build)}
                 className="rounded-2xl p-4 text-left transition hover:brightness-95"
                 style={{ background: 'var(--color-accent-soft)', border: '1px solid var(--color-border)' }}
               >
@@ -185,14 +189,28 @@ export function ProjectsScreen({ onOpen }: { onOpen: () => void }) {
                     </span>
                     <span>{relativeTime(p.updatedAt)}</span>
                   </div>
-                  <div className="mt-2 flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
-                    <button title="Duplicate" onClick={() => void duplicate(p.id, p.name)} className="rounded-md px-1.5 py-1 text-xs transition hover:bg-[var(--color-bg)]">
-                      ⧉
-                    </button>
-                    <button title="Delete" onClick={() => void remove(p.id, p.name)} className="rounded-md px-1.5 py-1 text-xs transition hover:bg-[var(--color-bg)]" style={{ color: 'var(--color-danger)' }}>
-                      🗑
-                    </button>
-                  </div>
+                  {confirmDeleteId === p.id ? (
+                    <div className="mt-2 flex items-center gap-1.5">
+                      <span className="text-[11px]" style={{ color: 'var(--color-danger)' }}>
+                        Delete?
+                      </span>
+                      <button onClick={() => void remove(p.id)} className="rounded-md px-2 py-0.5 text-[11px] font-medium text-white" style={{ background: 'var(--color-danger)' }}>
+                        Yes
+                      </button>
+                      <button onClick={() => setConfirmDeleteId(null)} className="rounded-md px-2 py-0.5 text-[11px]" style={{ color: 'var(--color-text-muted)' }}>
+                        Cancel
+                      </button>
+                    </div>
+                  ) : (
+                    <div className="mt-2 flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
+                      <button title="Duplicate" onClick={() => void duplicate(p.id, p.name)} className="rounded-md px-1.5 py-1 text-xs transition hover:bg-[var(--color-bg)]">
+                        ⧉
+                      </button>
+                      <button title="Delete" onClick={() => setConfirmDeleteId(p.id)} className="rounded-md px-1.5 py-1 text-xs transition hover:bg-[var(--color-bg)]" style={{ color: 'var(--color-danger)' }}>
+                        🗑
+                      </button>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}

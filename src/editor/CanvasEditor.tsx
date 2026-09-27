@@ -1,14 +1,16 @@
 import type { PointerEvent as ReactPointerEvent } from 'react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../app/store';
-import type { XY } from '../data/schema';
-import { TILE_INFO } from '../data/schema';
+import type { Layout, XY } from '../data/schema';
+import { TILE_INFO, TileId } from '../data/schema';
 import { PRIMARY_BLOCKS } from './blocks';
 import { applyBrushSize, floodFillIndices, idx, inBounds, quantizeDirection, rasterLine, rasterRect } from './grid';
+import { ENTRANCE_TYPE_LABEL, VEHICLE_TYPE_LABEL, produceLabel } from './labels';
 import { objectAtCell } from './objectLayer';
 import { fitToScreen, zoomAroundPoint } from './viewport';
 import type { LayerVisibility, Viewport } from '../viz/renderTiles';
 import { CANVAS_PAPER_COLOR, TERRAIN_ALPHA, cellToScreen, drawArrow, drawScene, screenToCell } from '../viz/renderTiles';
+import { HoverLabel } from '../viz/HoverLabel';
 
 // How close (in cells) to the current edge triggers growth, and how many
 // cells to grow by each time — gives the user room to keep dragging without
@@ -100,11 +102,14 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
   const setViewportSize = useAppStore((s) => s.setViewportSize);
   const hoverCell = useAppStore((s) => s.hoverCell);
   const setHoverCell = useAppStore((s) => s.setHoverCell);
+  const viewportSize = useAppStore((s) => s.viewportSize);
 
   const width = project.grid.width;
   const height = project.grid.height;
   const layout = project.baseline;
   const vehicleTypeFootprints = project.demand.vehicleTypes;
+  const hoverText = describeCell(layout, width, height, hoverCell);
+  const hoverLabelPos = hoverCell ? cellToScreen(viewport, hoverCell.x + 1, hoverCell.y) : null;
 
   const [measureEnd, setMeasureEnd] = useState<XY | null>(null);
   const [measureStart, setMeasureStart] = useState<XY | null>(null);
@@ -711,8 +716,10 @@ export function CanvasEditor({ lintCells }: { lintCells: Set<string> }) {
         onPointerDown={onPointerDown}
         onPointerMove={onPointerMove}
         onPointerUp={onPointerUp}
+        onPointerLeave={() => setHoverCell(null)}
         onContextMenu={(e) => e.preventDefault()}
       />
+      {hoverLabelPos && <HoverLabel text={hoverText} x={hoverLabelPos.x} y={hoverLabelPos.y} containerWidth={viewportSize.width} containerHeight={viewportSize.height} />}
       {calibDialog}
     </div>
   );
@@ -729,6 +736,36 @@ function rectFromDrag(start: XY, end: XY, square: boolean): { x0: number; y0: nu
     ey = start.y + Math.sign(dy || 1) * d;
   }
   return { x0: Math.min(start.x, ex), y0: Math.min(start.y, ey), x1: Math.max(start.x, ex), y1: Math.max(start.y, ey) };
+}
+
+function describeCell(layout: Layout, width: number, height: number, cell: XY | null): string | null {
+  if (!cell || !inBounds(cell.x, cell.y, width, height)) return null;
+  const obj = objectAtCell(layout, width, height, cell.x, cell.y);
+  if (obj) {
+    switch (obj.kind) {
+      case 'stall':
+        return obj.produce.length > 0 ? `Stall — ${obj.produce.map(produceLabel).join(', ')}` : 'Stall (empty)';
+      case 'entrance':
+        return ENTRANCE_TYPE_LABEL[obj.type];
+      case 'vehicle_bay':
+        return `${VEHICLE_TYPE_LABEL[obj.vehicleType]} bay`;
+      case 'barrier':
+        return 'Barrier (movable)';
+      case 'waste_point':
+        return 'Waste point';
+      case 'water_point':
+        return 'Water point';
+      case 'sign':
+        return 'Sign';
+      case 'label':
+        return 'Label';
+      case 'transect':
+        return 'Transect (measurement line)';
+    }
+  }
+  const tileId = layout.terrain[idx(cell.x, cell.y, width)];
+  if (tileId === TileId.OpenGround) return null;
+  return TILE_INFO[tileId]?.name ?? null;
 }
 
 function hoverHighlightTool(tool: string): boolean {

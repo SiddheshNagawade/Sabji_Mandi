@@ -3,6 +3,8 @@ import type { Project, ProvenanceTag } from '../data/schema';
 import type { ProjectSummary } from '../data/projectLibrary';
 import { listProjectSummaries, loadProjectFromLibrary } from '../data/projectLibrary';
 import { countProvenance } from '../data/provenance';
+import type { LayoutStats } from '../data/layoutStats';
+import { computeLayoutStats } from '../data/layoutStats';
 import { computeLintWarnings } from '../editor/layoutLinter';
 import type { WorkerMessage } from '../sim/worker/protocol';
 
@@ -118,9 +120,12 @@ export function CompareScreen() {
   const summaryB = summaries.find((s) => s.id === idB);
   const provA = projectA ? countProvenance(projectA) : null;
   const provB = projectB ? countProvenance(projectB) : null;
+  const statsA = projectA ? computeLayoutStats(projectA) : null;
+  const statsB = projectB ? computeLayoutStats(projectB) : null;
   const issuesA = projectA ? computeLintWarnings(projectA.baseline, projectA.grid.width, projectA.grid.height).filter((w) => w.severity === 'error') : [];
   const issuesB = projectB ? computeLintWarnings(projectB.baseline, projectB.grid.width, projectB.grid.height).filter((w) => w.severity === 'error') : [];
   const canRun = issuesA.length === 0 && issuesB.length === 0;
+  const insights = summaryA && summaryB && statsA && statsB ? buildComparisonInsights(summaryA.name, summaryB.name, statsA, statsB, resultA, resultB) : [];
 
   if (summaries.length < 2) {
     return (
@@ -155,6 +160,19 @@ export function CompareScreen() {
             </div>
 
             <StatTable summaryA={summaryA} summaryB={summaryB} provA={provA} provB={provB} />
+
+            {insights.length > 0 && (
+              <div className="rounded-2xl p-4" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
+                <h2 className="mb-2 text-sm font-semibold" style={{ color: 'var(--color-text)' }}>
+                  Insights
+                </h2>
+                <ul className="list-disc space-y-1.5 pl-4 text-sm" style={{ color: 'var(--color-text)' }}>
+                  {insights.map((line, i) => (
+                    <li key={i}>{line}</li>
+                  ))}
+                </ul>
+              </div>
+            )}
 
             <div className="rounded-2xl p-4" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-border)' }}>
               {canRun ? (
@@ -332,4 +350,58 @@ function ResultTable({ a, b, nameA, nameB }: { a: RunResult | null; b: RunResult
       </tbody>
     </table>
   );
+}
+
+function compareCount(label: string, nameA: string, nameB: string, a: number, b: number): string | null {
+  if (a === b) return null;
+  const [more, moreVal, less, lessVal] = a > b ? [nameA, a, nameB, b] : [nameB, b, nameA, a];
+  return `${more} had ${moreVal} ${label} vs ${lessVal} in ${less}.`;
+}
+
+function buildComparisonInsights(nameA: string, nameB: string, statsA: LayoutStats, statsB: LayoutStats, resultA: RunResult | null, resultB: RunResult | null): string[] {
+  const lines: string[] = [];
+
+  if (statsA.stallCount !== statsB.stallCount) {
+    const [more, moreN, less, lessN] = statsA.stallCount > statsB.stallCount ? [nameA, statsA.stallCount, nameB, statsB.stallCount] : [nameB, statsB.stallCount, nameA, statsA.stallCount];
+    lines.push(`${more} has more stalls than ${less} (${moreN} vs ${lessN}).`);
+  }
+
+  if (statsA.areaM2PerStall != null && statsB.areaM2PerStall != null && Math.round(statsA.areaM2PerStall) !== Math.round(statsB.areaM2PerStall)) {
+    const [tighter, tighterVal, looser, looserVal] =
+      statsA.areaM2PerStall < statsB.areaM2PerStall ? [nameA, statsA.areaM2PerStall, nameB, statsB.areaM2PerStall] : [nameB, statsB.areaM2PerStall, nameA, statsA.areaM2PerStall];
+    lines.push(`${tighter} packs stalls tighter — about ${Math.round(tighterVal as number)} m² per stall, vs ${Math.round(looserVal as number)} m² in ${looser}.`);
+  }
+
+  const walkDiffPts = Math.round((statsA.walkableFraction - statsB.walkableFraction) * 100);
+  if (Math.abs(walkDiffPts) >= 2) {
+    const [more, moreFrac, less, lessFrac] = walkDiffPts > 0 ? [nameA, statsA.walkableFraction, nameB, statsB.walkableFraction] : [nameB, statsB.walkableFraction, nameA, statsA.walkableFraction];
+    lines.push(`${more} dedicates more space to movement — ${Math.round((moreFrac as number) * 100)}% walkable vs ${Math.round((lessFrac as number) * 100)}% in ${less}.`);
+  }
+
+  if (statsA.stallsPerPedEntrance != null && statsB.stallsPerPedEntrance != null && Math.round(statsA.stallsPerPedEntrance * 10) !== Math.round(statsB.stallsPerPedEntrance * 10)) {
+    const [more, moreVal, less] =
+      statsA.stallsPerPedEntrance > statsB.stallsPerPedEntrance ? [nameA, statsA.stallsPerPedEntrance, nameB] : [nameB, statsB.stallsPerPedEntrance, nameA];
+    lines.push(`${more} has more stalls riding on each pedestrian entrance (${Math.round((moreVal as number) * 10) / 10} per gate) than ${less} — a single busy gate is more likely to bottleneck it.`);
+  }
+
+  if (resultA?.status === 'done' && resultB?.status === 'done') {
+    if (resultA.meanTimeInMarketS != null && resultB.meanTimeInMarketS != null && resultA.meanTimeInMarketS !== resultB.meanTimeInMarketS) {
+      const [slower, slowerVal, faster, fasterVal] =
+        resultA.meanTimeInMarketS > resultB.meanTimeInMarketS
+          ? [nameA, resultA.meanTimeInMarketS, nameB, resultB.meanTimeInMarketS]
+          : [nameB, resultB.meanTimeInMarketS, nameA, resultA.meanTimeInMarketS];
+      const pctLonger = (fasterVal as number) > 0 ? Math.round((((slowerVal as number) - (fasterVal as number)) / (fasterVal as number)) * 100) : null;
+      lines.push(
+        `Buyers spend longer in ${slower} — about ${Math.round((slowerVal as number) / 60)} min vs ${Math.round((fasterVal as number) / 60)} min in ${faster}${pctLonger ? ` (${pctLonger}% longer)` : ''}.`,
+      );
+    }
+    const blocked = compareCount('trip(s) turned away by a blocked stall', nameA, nameB, resultA.skippedBlocked, resultB.skippedBlocked);
+    if (blocked) lines.push(blocked);
+    const queued = compareCount('buyer(s) who gave up waiting in a queue', nameA, nameB, resultA.skippedQueue, resultB.skippedQueue);
+    if (queued) lines.push(queued);
+    const conflicts = compareCount('vehicle conflict(s)', nameA, nameB, resultA.vehicleConflicts, resultB.vehicleConflicts);
+    if (conflicts) lines.push(conflicts);
+  }
+
+  return lines;
 }
