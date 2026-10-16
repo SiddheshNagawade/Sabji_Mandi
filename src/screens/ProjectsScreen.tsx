@@ -4,7 +4,6 @@ import type { Project } from '../data/schema';
 import type { ProjectSummary } from '../data/projectLibrary';
 import { deleteProjectFromLibrary, duplicateProjectInLibrary, ensureDemoMarketsSeeded, listProjectSummaries, loadProjectFromLibrary, renameProjectInLibrary, saveProjectToLibrary, uniqueProjectName } from '../data/projectLibrary';
 import { downloadProjectFile, readProjectFile } from '../data/io';
-import { DEMO_MARKETS } from '../data/demoProjects';
 
 function relativeTime(iso: string): string {
   const ms = Date.now() - new Date(iso).getTime();
@@ -56,13 +55,6 @@ export function ProjectsScreen({ onOpen }: { onOpen: () => void }) {
     onOpen();
   }
 
-  async function openDemo(build: () => Project) {
-    const project = build();
-    project.meta.name = await uniqueProjectName(project.meta.name);
-    setProject(project);
-    onOpen();
-  }
-
   async function duplicate(id: string, name: string) {
     const copy = await duplicateProjectInLibrary(id, `${name} copy`);
     if (copy) await refresh();
@@ -71,10 +63,6 @@ export function ProjectsScreen({ onOpen }: { onOpen: () => void }) {
   async function exportSaved(id: string) {
     const project = await loadProjectFromLibrary(id);
     if (project) downloadProjectFile(project);
-  }
-
-  function exportDemo(build: () => Project) {
-    downloadProjectFile(build());
   }
 
   async function importFromFile(file: File) {
@@ -157,50 +145,12 @@ export function ProjectsScreen({ onOpen }: { onOpen: () => void }) {
           </div>
         )}
 
-        <div className="mb-8">
-          <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--color-text-faint)' }}>
-            Demo markets
-          </h2>
-          <p className="mb-3 text-sm" style={{ color: 'var(--color-text-muted)' }}>
-            Three ready-made markets — open one straight into Simulate, Compare, or History to see how everything fits together.
-          </p>
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            {DEMO_MARKETS.map((demo) => (
-              <div key={demo.id} className="group relative rounded-2xl" style={{ background: 'var(--color-accent-soft)', border: '1px solid var(--color-border)' }}>
-                <button onClick={() => void openDemo(demo.build)} className="block w-full p-4 text-left transition hover:brightness-95">
-                  <div className="text-sm font-semibold" style={{ color: 'var(--color-accent-hover)' }}>
-                    {demo.name}
-                  </div>
-                  <p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                    {demo.description}
-                  </p>
-                </button>
-                <button
-                  title={`Export ${demo.name} as a .mandi.json file to share`}
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    exportDemo(demo.build);
-                  }}
-                  className="absolute right-2 top-2 rounded-md px-1.5 py-1 text-xs opacity-0 transition group-hover:opacity-100"
-                  style={{ background: 'var(--color-surface)', color: 'var(--color-text-muted)' }}
-                >
-                  ⬇
-                </button>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--color-text-faint)' }}>
-          Your markets
-        </h2>
-
         {projects == null && <p className="text-sm" style={{ color: 'var(--color-text-faint)' }}>Loading…</p>}
 
         {projects != null && projects.length === 0 && (
           <div className="rounded-2xl border border-dashed px-6 py-16 text-center" style={{ borderColor: 'var(--color-border-strong)' }}>
             <p className="text-sm" style={{ color: 'var(--color-text-muted)' }}>
-              No markets yet. Start with a blank grid, or open one of the demo markets above to see how it works.
+              No markets yet. Start with a blank grid, or import one a teammate shared with you.
             </p>
           </div>
         )}
