@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useAppStore } from '../app/store';
 import type { Project } from '../data/schema';
 import type { ProjectSummary } from '../data/projectLibrary';
-import { deleteProjectFromLibrary, duplicateProjectInLibrary, listProjectSummaries, loadProjectFromLibrary, renameProjectInLibrary, uniqueProjectName } from '../data/projectLibrary';
+import { deleteProjectFromLibrary, duplicateProjectInLibrary, ensureDemoMarketsSeeded, listProjectSummaries, loadProjectFromLibrary, renameProjectInLibrary, saveProjectToLibrary, uniqueProjectName } from '../data/projectLibrary';
+import { downloadProjectFile, readProjectFile } from '../data/io';
 import { DEMO_MARKETS } from '../data/demoProjects';
 
 function relativeTime(iso: string): string {
@@ -24,10 +25,19 @@ export function ProjectsScreen({ onOpen }: { onOpen: () => void }) {
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [nameDraft, setNameDraft] = useState('');
   const [confirmDeleteId, setConfirmDeleteId] = useState<string | null>(null);
+  const [importError, setImportError] = useState<string | null>(null);
+  const importInputRef = useRef<HTMLInputElement>(null);
 
   async function refresh() {
     setProjects(await listProjectSummaries());
   }
+
+  useEffect(() => {
+    void (async () => {
+      const seeded = await ensureDemoMarketsSeeded();
+      if (seeded) await refresh();
+    })();
+  }, []);
 
   useEffect(() => {
     void refresh();
@@ -58,6 +68,32 @@ export function ProjectsScreen({ onOpen }: { onOpen: () => void }) {
     if (copy) await refresh();
   }
 
+  async function exportSaved(id: string) {
+    const project = await loadProjectFromLibrary(id);
+    if (project) downloadProjectFile(project);
+  }
+
+  function exportDemo(build: () => Project) {
+    downloadProjectFile(build());
+  }
+
+  async function importFromFile(file: File) {
+    setImportError(null);
+    try {
+      const project = await readProjectFile(file);
+      const now = new Date().toISOString();
+      const imported: Project = {
+        ...project,
+        id: crypto.randomUUID(),
+        meta: { ...project.meta, name: await uniqueProjectName(project.meta.name), createdAt: now, updatedAt: now, isSyntheticExample: undefined },
+      };
+      await saveProjectToLibrary(imported);
+      await refresh();
+    } catch {
+      setImportError('Could not read that file — is it a .mandi.json export?');
+    }
+  }
+
   async function remove(id: string) {
     setConfirmDeleteId(null);
     await deleteProjectFromLibrary(id);
@@ -86,6 +122,25 @@ export function ProjectsScreen({ onOpen }: { onOpen: () => void }) {
             </p>
           </div>
           <div className="flex gap-2">
+            <input
+              ref={importInputRef}
+              type="file"
+              accept=".json,.mandi.json,application/json"
+              className="hidden"
+              onChange={(e) => {
+                const file = e.target.files?.[0];
+                e.target.value = '';
+                if (file) void importFromFile(file);
+              }}
+            />
+            <button
+              onClick={() => importInputRef.current?.click()}
+              title="Import a .mandi.json file someone shared with you"
+              className="rounded-lg px-3 py-2 text-sm font-medium transition hover:brightness-95"
+              style={{ background: 'var(--color-accent-soft)', color: 'var(--color-accent-hover)', border: '1px solid var(--color-border)' }}
+            >
+              ⬆ Import
+            </button>
             <button
               onClick={() => void createBlank()}
               className="rounded-lg px-3 py-2 text-sm font-medium text-white transition"
@@ -96,6 +151,12 @@ export function ProjectsScreen({ onOpen }: { onOpen: () => void }) {
           </div>
         </div>
 
+        {importError && (
+          <div className="mb-4 rounded-lg px-3 py-2 text-sm" style={{ background: 'var(--color-surface)', border: '1px solid var(--color-danger)', color: 'var(--color-danger)' }}>
+            {importError}
+          </div>
+        )}
+
         <div className="mb-8">
           <h2 className="mb-1 text-sm font-semibold uppercase tracking-wide" style={{ color: 'var(--color-text-faint)' }}>
             Demo markets
@@ -105,19 +166,27 @@ export function ProjectsScreen({ onOpen }: { onOpen: () => void }) {
           </p>
           <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
             {DEMO_MARKETS.map((demo) => (
-              <button
-                key={demo.id}
-                onClick={() => void openDemo(demo.build)}
-                className="rounded-2xl p-4 text-left transition hover:brightness-95"
-                style={{ background: 'var(--color-accent-soft)', border: '1px solid var(--color-border)' }}
-              >
-                <div className="text-sm font-semibold" style={{ color: 'var(--color-accent-hover)' }}>
-                  {demo.name}
-                </div>
-                <p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
-                  {demo.description}
-                </p>
-              </button>
+              <div key={demo.id} className="group relative rounded-2xl" style={{ background: 'var(--color-accent-soft)', border: '1px solid var(--color-border)' }}>
+                <button onClick={() => void openDemo(demo.build)} className="block w-full p-4 text-left transition hover:brightness-95">
+                  <div className="text-sm font-semibold" style={{ color: 'var(--color-accent-hover)' }}>
+                    {demo.name}
+                  </div>
+                  <p className="mt-1 text-xs" style={{ color: 'var(--color-text-muted)' }}>
+                    {demo.description}
+                  </p>
+                </button>
+                <button
+                  title={`Export ${demo.name} as a .mandi.json file to share`}
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    exportDemo(demo.build);
+                  }}
+                  className="absolute right-2 top-2 rounded-md px-1.5 py-1 text-xs opacity-0 transition group-hover:opacity-100"
+                  style={{ background: 'var(--color-surface)', color: 'var(--color-text-muted)' }}
+                >
+                  ⬇
+                </button>
+              </div>
             ))}
           </div>
         </div>
@@ -203,6 +272,9 @@ export function ProjectsScreen({ onOpen }: { onOpen: () => void }) {
                     </div>
                   ) : (
                     <div className="mt-2 flex items-center gap-1 opacity-0 transition group-hover:opacity-100">
+                      <button title="Export as .mandi.json to share" onClick={() => void exportSaved(p.id)} className="rounded-md px-1.5 py-1 text-xs transition hover:bg-[var(--color-bg)]">
+                        ⬇
+                      </button>
                       <button title="Duplicate" onClick={() => void duplicate(p.id, p.name)} className="rounded-md px-1.5 py-1 text-xs transition hover:bg-[var(--color-bg)]">
                         ⧉
                       </button>

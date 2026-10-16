@@ -151,6 +151,34 @@ export async function duplicateProjectInLibrary(id: string, newName?: string): P
   return copy;
 }
 
+const SEEDED_DEMO_IDS_KEY = 'mandi-seeded-demo-ids';
+
+/**
+ * Makes sure every demo market (the small hand-built ones plus Old/New
+ * Mandi) has its own always-there copy under "Your markets", so they're
+ * available as defaults without the user having to open each one first.
+ * Tracked by demo id, once ever — a demo the user later renames, edits, or
+ * deletes stays however they left it; it's never silently re-added.
+ */
+export async function ensureDemoMarketsSeeded(): Promise<boolean> {
+  const { get, set } = await import('idb-keyval');
+  const { DEMO_MARKETS } = await import('./demoProjects');
+  const seededIds = (await get<string[]>(SEEDED_DEMO_IDS_KEY)) ?? [];
+  const seededSet = new Set(seededIds);
+  const toSeed = DEMO_MARKETS.filter((d) => !seededSet.has(d.id));
+  if (toSeed.length === 0) return false;
+
+  for (const demo of toSeed) {
+    const project = demo.build();
+    project.meta.isSyntheticExample = true;
+    project.meta.name = await uniqueProjectName(project.meta.name);
+    await saveProjectToLibrary(project);
+    seededSet.add(demo.id);
+  }
+  await set(SEEDED_DEMO_IDS_KEY, [...seededSet]);
+  return true;
+}
+
 export async function getCurrentProjectId(): Promise<string | undefined> {
   const { get } = await import('idb-keyval');
   return get<string>(CURRENT_KEY);
